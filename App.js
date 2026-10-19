@@ -65,6 +65,7 @@ export default function App() {
 
   // Modals
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingMedId, setEditingMedId] = useState(null);
   const [backupModalVisible, setBackupModalVisible] = useState(false);
   const [snoozeModalVisible, setSnoozeModalVisible] = useState(false);
   const [guideModalVisible, setGuideModalVisible] = useState(false);
@@ -72,7 +73,14 @@ export default function App() {
   const [customSnoozeMinutes, setCustomSnoozeMinutes] = useState('');
   const [rawJsonText, setRawJsonText] = useState('');
 
-  // Formular-Zustand
+  // Historie-Bearbeitungs-State
+  const [logModalVisible, setLogModalVisible] = useState(false);
+  const [editingLogId, setEditingLogId] = useState(null);
+  const [logTitle, setLogTitle] = useState('');
+  const [logTime, setLogTime] = useState('');
+  const [logStatus, setLogStatus] = useState('EINGENOMMEN');
+
+  // Formular-Zustand für Medikamente
   const [title, setTitle] = useState('');
   const [dosage, setDosage] = useState('');
   const [time, setTime] = useState('08:00');
@@ -93,6 +101,18 @@ export default function App() {
     }
   }, [lastNotificationResponse]);
 
+  // Automatische Formatierung für Uhrzeit (HH:MM)
+  const handleTimeChange = (text) => {
+    let cleaned = text.replace(/[^0-9]/g, '');
+    if (cleaned.length > 4) cleaned = cleaned.slice(0, 4);
+
+    if (cleaned.length >= 3) {
+      setTime(`${cleaned.slice(0, 2)}:${cleaned.slice(2)}`);
+    } else {
+      setTime(cleaned);
+    }
+  };
+
   const setupNotificationActions = async () => {
     if (!Notifications) return;
     try {
@@ -104,18 +124,8 @@ export default function App() {
         },
         {
           identifier: 'ACTION_SNOOZE_30',
-          buttonTitle: '⏱️ +30 Min',
+          buttonTitle: '⏱️ Später (+30 Min)',
           options: { opensAppToForeground: false },
-        },
-        {
-          identifier: 'ACTION_SNOOZE_60',
-          buttonTitle: '⏱️ +60 Min',
-          options: { opensAppToForeground: false },
-        },
-        {
-          identifier: 'ACTION_SNOOZE_CUSTOM',
-          buttonTitle: '⚙️ Zeit wählen',
-          options: { opensAppToForeground: true },
         },
         {
           identifier: 'ACTION_SKIP',
@@ -138,8 +148,17 @@ export default function App() {
     const actionId = response.actionIdentifier;
     if (!actionId || actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
 
-    const notificationData = response.notification.request.content.data;
+    const notification = response.notification;
+    const notificationData = notification.request.content.data;
     const medId = notificationData?.medId;
+
+    if (Notifications && notification.request.identifier) {
+      try {
+        await Notifications.dismissNotificationAsync(notification.request.identifier);
+      } catch (e) {
+        console.log('Fehler beim Ausblenden der Benachrichtigung:', e);
+      }
+    }
 
     if (!medId) return;
 
@@ -168,11 +187,6 @@ export default function App() {
         setLogs(updatedLogs);
       } else if (actionId === 'ACTION_SNOOZE_30') {
         await executeSnooze(targetMed, 30);
-      } else if (actionId === 'ACTION_SNOOZE_60') {
-        await executeSnooze(targetMed, 60);
-      } else if (actionId === 'ACTION_SNOOZE_CUSTOM') {
-        setSelectedMedForSnooze(targetMed);
-        setSnoozeModalVisible(true);
       } else if (actionId === 'ACTION_SKIP') {
         const newLog = {
           id: Date.now().toString(),
@@ -291,34 +305,83 @@ export default function App() {
     }
   };
 
-  const addMedication = async () => {
+  const saveMedicationForm = async () => {
     if (!title.trim()) {
       Alert.alert('⚠️ Fehler', 'Bitte gib einen Namen für das Medikament ein.');
       return;
     }
 
-    const newMed = {
-      id: Date.now().toString(),
-      title: title.trim(),
-      dosage: dosage.trim() || '1 Dosis',
-      time: time.trim() || '08:00',
-      notes: notes.trim(),
-      active: true,
-      notificationId: null
-    };
+    let formattedTime = time.trim();
+    if (!formattedTime.includes(':') && formattedTime.length === 4) {
+      formattedTime = `${formattedTime.slice(0, 2)}:${formattedTime.slice(2)}`;
+    }
 
-    const notifId = await scheduleNotification(newMed);
-    newMed.notificationId = notifId;
+    if (editingMedId) {
+      const target = meds.find((m) => m.id === editingMedId);
+      if (target && target.notificationId) {
+        await cancelNotification(target.notificationId);
+      }
 
-    const updatedMeds = [...meds, newMed];
-    setMeds(updatedMeds);
-    saveData(updatedMeds, logs);
+      const updatedMed = {
+        id: editingMedId,
+        title: title.trim(),
+        dosage: dosage.trim() || '1 Dosis',
+        time: formattedTime || '08:00',
+        notes: notes.trim(),
+        active: target ? target.active : true,
+        notificationId: null
+      };
+
+      if (updatedMed.active) {
+        updatedMed.notificationId = await scheduleNotification(updatedMed);
+      }
+
+      const updatedMeds = meds.map((m) => (m.id === editingMedId ? updatedMed : m));
+      setMeds(updatedMeds);
+      saveData(updatedMeds, logs);
+    } else {
+      const newMed = {
+        id: Date.now().toString(),
+        title: title.trim(),
+        dosage: dosage.trim() || '1 Dosis',
+        time: formattedTime || '08:00',
+        notes: notes.trim(),
+        active: true,
+        notificationId: null
+      };
+
+      const notifId = await scheduleNotification(newMed);
+      newMed.notificationId = notifId;
+
+      const updatedMeds = [...meds, newMed];
+      setMeds(updatedMeds);
+      saveData(updatedMeds, logs);
+    }
 
     setTitle('');
     setDosage('');
     setTime('08:00');
     setNotes('');
+    setEditingMedId(null);
     setModalVisible(false);
+  };
+
+  const openEditModal = (med) => {
+    setEditingMedId(med.id);
+    setTitle(med.title);
+    setDosage(med.dosage);
+    setTime(med.time);
+    setNotes(med.notes || '');
+    setModalVisible(true);
+  };
+
+  const openNewModal = () => {
+    setEditingMedId(null);
+    setTitle('');
+    setDosage('');
+    setTime('08:00');
+    setNotes('');
+    setModalVisible(true);
   };
 
   const toggleMedication = async (id) => {
@@ -409,7 +472,58 @@ export default function App() {
     );
   };
 
-  // BACKUP DIREKT ALS JSON-DATEI AUF HANDY SPEICHERN
+  // HISTORIE (LOGS) BEARBEITEN & LÖSCHEN
+  const openEditLogModal = (log) => {
+    setEditingLogId(log.id);
+    setLogTitle(log.title);
+    setLogTime(log.scheduledTime || '08:00');
+    setLogStatus(log.status);
+    setLogModalVisible(true);
+  };
+
+  const saveLogForm = () => {
+    if (!logTitle.trim()) {
+      Alert.alert('⚠️ FEHLER', 'Bitte gib einen gültigen Namen ein.');
+      return;
+    }
+
+    const updatedLogs = logs.map((log) => {
+      if (log.id === editingLogId) {
+        return {
+          ...log,
+          title: logTitle.trim(),
+          scheduledTime: logTime.trim(),
+          status: logStatus,
+        };
+      }
+      return log;
+    });
+
+    setLogs(updatedLogs);
+    saveData(meds, updatedLogs);
+    setLogModalVisible(false);
+    setEditingLogId(null);
+  };
+
+  const deleteLogItem = (id) => {
+    Alert.alert(
+      '🗑️ HISTORIE LÖSCHEN',
+      'Möchtest du diesen Eintrag aus dem Verlauf wirklich löschen?',
+      [
+        { text: '❌ Abbrechen', style: 'cancel' },
+        {
+          text: '🗑️ Löschen',
+          style: 'destructive',
+          onPress: () => {
+            const updatedLogs = logs.filter((l) => l.id !== id);
+            setLogs(updatedLogs);
+            saveData(meds, updatedLogs);
+          },
+        },
+      ]
+    );
+  };
+
   const exportBackup = async () => {
     const backupData = {
       version: 1,
@@ -513,7 +627,6 @@ export default function App() {
     }
   };
 
-  // STATISTIK-BERECHNUNGEN
   const calculateStatistics = () => {
     const totalLogs = logs.length;
     const takenLogs = logs.filter((l) => l.status === 'EINGENOMMEN');
@@ -554,8 +667,6 @@ export default function App() {
   };
 
   const stats = calculateStatistics();
-
-  // FARBPALETTEN
   const theme = isDarkMode ? darkColors : lightColors;
 
   return (
@@ -588,7 +699,7 @@ export default function App() {
         <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
       </View>
 
-      {/* KLAR BESCHRIFTETE TAB-NAVIGATIONSLEISTE */}
+      {/* TAB-NAVIGATIONSLEISTE */}
       <View style={styles.mainTabRow}>
         <TouchableOpacity
           style={[
@@ -632,7 +743,7 @@ export default function App() {
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-              onPress={() => setModalVisible(true)}
+              onPress={openNewModal}
             >
               <Text style={[styles.btnText, { color: theme.btnTextColor }]}>➕ NEU</Text>
             </TouchableOpacity>
@@ -705,50 +816,61 @@ export default function App() {
                   ) : null}
                 </View>
 
-                <View style={styles.cardFooter}>
-                  <TouchableOpacity
-                    style={[styles.smallBtn, styles.greenBtn]}
-                    onPress={() => markAsTaken(item)}
-                  >
-                    <Text style={styles.smallBtnTextGreen}>✅ NEHMEN</Text>
-                  </TouchableOpacity>
+                {/* ZWEI-ZEILIGES BUTTON-GRID */}
+                <View style={styles.cardFooterContainer}>
+                  <View style={styles.cardFooterRow}>
+                    <TouchableOpacity
+                      style={[styles.smallBtn, styles.greenBtn]}
+                      onPress={() => markAsTaken(item)}
+                    >
+                      <Text style={styles.smallBtnTextGreen}>✅ NEHMEN</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.smallBtn, styles.amberBtn]}
-                    onPress={() => {
-                      setSelectedMedForSnooze(item);
-                      setSnoozeModalVisible(true);
-                    }}
-                  >
-                    <Text style={styles.smallBtnTextAmber}>⏱️ SPÄTER</Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.smallBtn, styles.amberBtn]}
+                      onPress={() => {
+                        setSelectedMedForSnooze(item);
+                        setSnoozeModalVisible(true);
+                      }}
+                    >
+                      <Text style={styles.smallBtnTextAmber}>⏱️ SPÄTER</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.smallBtn, styles.purpleBtn]}
-                    onPress={() => skipMedication(item)}
-                  >
-                    <Text style={styles.smallBtnTextPurple}>⏭️ ÜBERSPRINGEN</Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.smallBtn, styles.purpleBtn]}
+                      onPress={() => skipMedication(item)}
+                    >
+                      <Text style={styles.smallBtnTextPurple}>⏭️ ÜBERSPRINGEN</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                  <TouchableOpacity
-                    style={[styles.smallBtn, styles.redBtn]}
-                    onPress={() => deleteMedication(item.id)}
-                  >
-                    <Text style={styles.smallBtnTextRed}>🗑️ LÖSCHEN</Text>
-                  </TouchableOpacity>
+                  <View style={styles.cardFooterRow}>
+                    <TouchableOpacity
+                      style={[styles.smallBtn, styles.blueBtn]}
+                      onPress={() => openEditModal(item)}
+                    >
+                      <Text style={styles.smallBtnTextBlue}>✏️ EDIT</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.smallBtn, styles.redBtn]}
+                      onPress={() => deleteMedication(item.id)}
+                    >
+                      <Text style={styles.smallBtnTextRed}>🗑️ LÖSCHEN</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             )}
           />
         </>
       ) : (
-        /* TAB 2: BESCHRIFTETE STATISTIK */
+        /* TAB 2: STATISTIK & BEARBEITBARE HISTORIE */
         <ScrollView contentContainerStyle={styles.statsContainer}>
           <Text style={[styles.statsSectionTitle, { color: theme.accent }]}>
             📊 AUSWERTUNG & ANALYSE
           </Text>
 
-          {/* KARTEN-GRID */}
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
               <Text style={styles.statIcon}>📈</Text>
@@ -773,9 +895,8 @@ export default function App() {
             </View>
           </View>
 
-          {/* HISTORIE */}
           <Text style={[styles.statsSectionTitle, { color: theme.textMain, marginTop: 24 }]}>
-            📋 HISTORIE ({logs.length} EINTRÄGE)
+            📋 HISTORIE ({logs.length} EINTRÄGE) - BEARBEITBAR & LÖSCHBAR
           </Text>
 
           {logs.length === 0 ? (
@@ -796,25 +917,44 @@ export default function App() {
                   { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }
                 ]}
               >
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, marginRight: 8 }}>
                   <Text style={[styles.logTitle, { color: theme.textMain }]}>💊 {log.title}</Text>
                   <Text style={[styles.logDate, { color: theme.textMuted }]}>
                     {new Date(log.timestamp).toLocaleString('de-DE')} | Soll: {log.scheduledTime || '08:00'} Uhr
                   </Text>
                 </View>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    log.status === 'EINGENOMMEN' ? styles.badgeTaken : styles.badgeSkipped
-                  ]}
-                >
-                  <Text
-                    style={
-                      log.status === 'EINGENOMMEN' ? styles.badgeTextTaken : styles.badgeTextSkipped
-                    }
+
+                {/* STATUS & BEARBEITUNGS-BUTTONS FÜR HISTORIE */}
+                <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      log.status === 'EINGENOMMEN' ? styles.badgeTaken : styles.badgeSkipped
+                    ]}
                   >
-                    {log.status}
-                  </Text>
+                    <Text
+                      style={
+                        log.status === 'EINGENOMMEN' ? styles.badgeTextTaken : styles.badgeTextSkipped
+                      }
+                    >
+                      {log.status}
+                    </Text>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={styles.logActionBtn}
+                      onPress={() => openEditLogModal(log)}
+                    >
+                      <Text style={{ fontSize: 12 }}>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.logActionBtn}
+                      onPress={() => deleteLogItem(log.id)}
+                    >
+                      <Text style={{ fontSize: 12 }}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             ))
@@ -829,59 +969,114 @@ export default function App() {
         </Text>
       </View>
 
-      {/* MODAL: BEDIENUNGSANLEITUNG */}
+      {/* MODAL: HISTORIE EINTRAG BEARBEITEN */}
+      <Modal visible={logModalVisible} animationType="fade" transparent={true}>
+        <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
+            <Text style={[styles.modalTitle, { color: theme.accent }]}>✏️ HISTORIE BEARBEITEN</Text>
+            <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>💊 MEDIKAMENTEN-NAME</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
+              value={logTitle}
+              onChangeText={setLogTitle}
+            />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>⏰ SOLL-UHRZEIT (HH:MM)</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
+              value={logTime}
+              onChangeText={setLogTime}
+              keyboardType="numeric"
+              maxLength={5}
+            />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>📌 STATUS</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+              <TouchableOpacity
+                style={[
+                  styles.statusSelectBtn,
+                  logStatus === 'EINGENOMMEN' && { backgroundColor: 'rgba(16, 185, 129, 0.3)', borderColor: '#10B981' },
+                  { borderColor: theme.cardBorder }
+                ]}
+                onPress={() => setLogStatus('EINGENOMMEN')}
+              >
+                <Text style={{ color: logStatus === 'EINGENOMMEN' ? '#10B981' : theme.textMuted, fontWeight: '800' }}>✅ EINGENOMMEN</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.statusSelectBtn,
+                  logStatus === 'ÜBERSPRUNGEN' && { backgroundColor: 'rgba(168, 85, 247, 0.3)', borderColor: '#A855F7' },
+                  { borderColor: theme.cardBorder }
+                ]}
+                onPress={() => setLogStatus('ÜBERSPRUNGEN')}
+              >
+                <Text style={{ color: logStatus === 'ÜBERSPRUNGEN' ? '#A855F7' : theme.textMuted, fontWeight: '800' }}>⏭️ ÜBERSPRUNGEN</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
+                onPress={saveLogForm}
+              >
+                <Text style={[styles.btnText, { color: theme.btnTextColor }]}>💾 SPEICHERN</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
+                onPress={() => setLogModalVisible(false)}
+              >
+                <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: HILFE & BEDIENUNGSANLEITUNG */}
       <Modal visible={guideModalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
-          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent, maxHeight: '80%' }]}>
-            <Text style={[styles.modalTitle, { color: theme.accent }]}>📖 BEDIENUNGSANLEITUNG</Text>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent, maxHeight: '85%' }]}>
+            <Text style={[styles.modalTitle, { color: theme.accent }]}>📖 BEDIENUNGSANLEITUNG & HILFE</Text>
             <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent, marginBottom: 10 }]} />
 
             <ScrollView contentContainerStyle={styles.guideContainer}>
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. ERSTE SCHRITTE</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. ERSTE SCHRITTE & PUSH-BENACHRICHTIGUNGEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Erlaube beim ersten Start der App die Anfrage für Push-Benachrichtigungen, damit Erinnerungssignale und Töne korrekt ausgegeben werden.
+                  Erlaube beim ersten Start der App die Benachrichtigungsanfrage. So klingeln Alarme pünktlich. Bei einer Push-Nachricht kannst du direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" tippen. Die Nachricht schließt sich danach automatisch.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>2. ERSCHEINUNGSBILD</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>2. DESIGN & DUNKELMODUS</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Nutze oben rechts den Schalter (☀️ HELL / 🌙 DUNKEL), um nahtlos zwischen dem hellem Modus und dem dunklen Sci-Fi-Look zu wechseln.
+                  Über den Schalter oben rechts (☀️ HELL / 🌙 DUNKEL) lässt sich das Erscheinungsbild der App nahtlos anpassen.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>3. MEDIKAMENT ANLEGEN</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>3. MEDIKAMENTE ANLEGEN & BEARBEITEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  • Tippe auf "➕ NEU".{'\n'}
-                  • Gib Name, Dosierung (z.B. 400mg), Uhrzeit (z.B. 08:00) und Notizen ein.{'\n'}
-                  • Tippe auf "💾 SPEICHERN".
+                  • <Text style={{ fontWeight: '800' }}>Neu:</Text> Tippe auf "➕ NEU". Die Uhrzeit (HH:MM) formatiert sich automatisch beim Tippen.{'\n'}
+                  • <Text style={{ fontWeight: '800' }}>Bearbeiten/Löschen:</Text> Nutze die Buttons "✏️ EDIT" oder "🗑️ LÖSCHEN" direkt auf der Medikamentenkarte.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>4. ERINNERUNGS-AKTIONEN</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>4. STATISTIK & HISTORIE BEARBEITEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  • ✅ NEHMEN: Markiert die Dosis als eingenommen.{'\n'}
-                  • ⏱️ SPÄTER: Verschiebt den Alarm (Schnellauswahl oder freie Minuteneingabe).{'\n'}
-                  • ⏭️ ÜBERSPRINGEN: Überspringt die Dosis im Protokoll.{'\n'}
-                  • 🗑️ LÖSCHEN: Entfernt den Eintrag dauerhaft.
+                  Im Statistik-Tab findest du deine Einnahmequote und Verspätung. Ab sofort kannst du jeden einzelnen Eintrag in der **Historie** über die Symbole `✏️` bearbeiten oder `🗑️` löschen.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. STATISTIK TAB</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. DATENSICHERUNG</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Über die obere Tab-Leiste gelangst du in die Statistik. Dort wird dir die Einnahmequote in % und die durchschnittliche Verspätung in Minuten angezeigt.
-                </Text>
-              </View>
-
-              <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>6. DATENSICHERUNG</Text>
-                <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  • 💾 SICHERN: Speichert die Daten direkt als `.json`-Datei im Speicher deines Handys.{'\n'}
-                  • 📂 LADEN: Öffnet eine `.json`-Sicherungsdatei zum Wiederherstellen aller Daten.
+                  • <Text style={{ fontWeight: '800' }}>💾 SICHERN:</Text> Erstellt eine `.json`-Datei im Handyspeicher.{'\n'}
+                  • <Text style={{ fontWeight: '800' }}>📂 LADEN:</Text> Stellt deine Daten aus einer Sicherung wieder her.
                 </Text>
               </View>
             </ScrollView>
@@ -948,11 +1143,13 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: NEUES MEDIKAMENT */}
+      {/* MODAL: MEDIKAMENT ANLEGEN & BEARBEITEN */}
       <Modal visible={modalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
-            <Text style={[styles.modalTitle, { color: theme.accent }]}>➕ NEUES MEDIKAMENT</Text>
+            <Text style={[styles.modalTitle, { color: theme.accent }]}>
+              {editingMedId ? '✏️ MEDIKAMENT BEARBEITEN' : '➕ NEUES MEDIKAMENT'}
+            </Text>
             <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
 
             <Text style={[styles.inputLabel, { color: theme.textSub }]}>💊 NAME DES MEDIKAMENTS</Text>
@@ -979,7 +1176,9 @@ export default function App() {
               placeholder="08:00"
               placeholderTextColor={theme.placeholder}
               value={time}
-              onChangeText={setTime}
+              onChangeText={handleTimeChange}
+              keyboardType="numeric"
+              maxLength={5}
             />
 
             <Text style={[styles.inputLabel, { color: theme.textSub }]}>📝 HINWEIS / NOTIZ</Text>
@@ -994,7 +1193,7 @@ export default function App() {
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
                 style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-                onPress={addMedication}
+                onPress={saveMedicationForm}
               >
                 <Text style={[styles.btnText, { color: theme.btnTextColor }]}>💾 SPEICHERN</Text>
               </TouchableOpacity>
@@ -1245,14 +1444,18 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: 4,
   },
-  cardFooter: {
-    flexDirection: 'row',
+  cardFooterContainer: {
     marginTop: 14,
-    gap: 6,
+    gap: 8,
+  },
+  cardFooterRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
   smallBtn: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 4,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1272,15 +1475,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#A855F7',
   },
+  blueBtn: {
+    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+    borderWidth: 1,
+    borderColor: '#0284C7',
+  },
   redBtn: {
     backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
     borderColor: '#EF4444',
   },
-  smallBtnTextGreen: { color: '#10B981', fontSize: 8.5, fontWeight: '800' },
-  smallBtnTextAmber: { color: '#F59E0B', fontSize: 8.5, fontWeight: '800' },
-  smallBtnTextPurple: { color: '#A855F7', fontSize: 8.5, fontWeight: '800' },
-  smallBtnTextRed: { color: '#EF4444', fontSize: 8.5, fontWeight: '800' },
+  smallBtnTextGreen: { color: '#10B981', fontSize: 9, fontWeight: '800', textAlign: 'center' },
+  smallBtnTextAmber: { color: '#F59E0B', fontSize: 9, fontWeight: '800', textAlign: 'center' },
+  smallBtnTextPurple: { color: '#A855F7', fontSize: 9, fontWeight: '800', textAlign: 'center' },
+  smallBtnTextBlue: { color: '#0284C7', fontSize: 9, fontWeight: '800', textAlign: 'center' },
+  smallBtnTextRed: { color: '#EF4444', fontSize: 9, fontWeight: '800', textAlign: 'center' },
 
   // STATS STYLES
   statsContainer: {
@@ -1363,6 +1572,17 @@ const styles = StyleSheet.create({
     color: '#A855F7',
     fontSize: 9,
     fontWeight: '900',
+  },
+  logActionBtn: {
+    padding: 4,
+  },
+  statusSelectBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   developerFooter: {
