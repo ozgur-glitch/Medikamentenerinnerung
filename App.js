@@ -152,9 +152,13 @@ export default function App() {
     const notificationData = notification.request.content.data;
     const medId = notificationData?.medId;
 
-    if (Notifications && notification.request.identifier) {
+    // Push-Benachrichtigung zuverlässig aus der Statusleiste entfernen (auch wenn App im Task-Manager geschlossen war)
+    if (Notifications) {
       try {
-        await Notifications.dismissNotificationAsync(notification.request.identifier);
+        if (notification?.request?.identifier) {
+          await Notifications.dismissNotificationAsync(notification.request.identifier);
+        }
+        await Notifications.dismissAllNotificationsAsync();
       } catch (e) {
         console.log('Fehler beim Ausblenden der Benachrichtigung:', e);
       }
@@ -209,6 +213,9 @@ export default function App() {
   const executeSnooze = async (med, minutes) => {
     if (!Notifications || !Notifications.scheduleNotificationAsync) return;
     try {
+      // Alle sichtbaren Benachrichtigungen sofort verwerfen
+      await Notifications.dismissAllNotificationsAsync();
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `⏰ VERZÖGERTER ALARM: ${med.title}`,
@@ -428,7 +435,12 @@ export default function App() {
     );
   };
 
-  const markAsTaken = (med) => {
+  const markAsTaken = async (med) => {
+    if (Notifications) {
+      try {
+        await Notifications.dismissAllNotificationsAsync();
+      } catch (e) {}
+    }
     const newLog = {
       id: Date.now().toString(),
       medId: med.id,
@@ -452,7 +464,12 @@ export default function App() {
         { text: '❌ Abbrechen', style: 'cancel' },
         {
           text: '⏭️ Überspringen',
-          onPress: () => {
+          onPress: async () => {
+            if (Notifications) {
+              try {
+                await Notifications.dismissAllNotificationsAsync();
+              } catch (e) {}
+            }
             const newLog = {
               id: Date.now().toString(),
               medId: med.id,
@@ -472,7 +489,6 @@ export default function App() {
     );
   };
 
-  // HISTORIE (LOGS) BEARBEITEN & LÖSCHEN
   const openEditLogModal = (log) => {
     setEditingLogId(log.id);
     setLogTitle(log.title);
@@ -1035,7 +1051,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: HILFE & BEDIENUNGSANLEITUNG */}
+      {/* MODAL: HILFE & BEDIENUNGSANLEITUNG (AKTUALISIERT) */}
       <Modal visible={guideModalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent, maxHeight: '85%' }]}>
@@ -1044,9 +1060,9 @@ export default function App() {
 
             <ScrollView contentContainerStyle={styles.guideContainer}>
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. ERSTE SCHRITTE & PUSH-BENACHRICHTIGUNGEN</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. PUSH-BENACHRICHTIGUNGEN & HINTERGRUND</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Erlaube beim ersten Start der App die Benachrichtigungsanfrage. So klingeln Alarme pünktlich. Bei einer Push-Nachricht kannst du direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" tippen. Die Nachricht schließt sich danach automatisch.
+                  Alarme funktionieren zuverlässig. Wenn eine Benachrichtigung eingeht, kannst du direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" tippen. Die Nachricht schließt sich dadurch sofort automatisch in der Statusleiste – selbst wenn die App im Task-Manager geschlossen war.
                 </Text>
               </View>
 
@@ -1068,7 +1084,7 @@ export default function App() {
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>4. STATISTIK & HISTORIE BEARBEITEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Im Statistik-Tab findest du deine Einnahmequote und Verspätung. Ab sofort kannst du jeden einzelnen Eintrag in der **Historie** über die Symbole `✏️` bearbeiten oder `🗑️` löschen.
+                  Im Statistik-Tab findest du deine Einnahmequote und Verspätung. Du kannst jeden einzelnen Eintrag in der **Historie** über die Symbole `✏️` bearbeiten oder `🗑️` löschen.
                 </Text>
               </View>
 
