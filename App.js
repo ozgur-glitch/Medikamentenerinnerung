@@ -149,10 +149,10 @@ export default function App() {
     if (!actionId || actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
 
     const notification = response.notification;
-    const notificationData = notification.request.content.data;
+    const notificationData = notification?.request?.content?.data;
     const medId = notificationData?.medId;
 
-    // Push-Benachrichtigung zuverlässig aus der Statusleiste entfernen (auch wenn App im Task-Manager geschlossen war)
+    // SOfortiges Verwerfen der Benachrichtigung erzwingen (auch wenn App im Hintergrund / geschlossen war)
     if (Notifications) {
       try {
         if (notification?.request?.identifier) {
@@ -160,7 +160,7 @@ export default function App() {
         }
         await Notifications.dismissAllNotificationsAsync();
       } catch (e) {
-        console.log('Fehler beim Ausblenden der Benachrichtigung:', e);
+        console.log('Fehler beim Schließen der Benachrichtigung im Hintergrund:', e);
       }
     }
 
@@ -213,7 +213,6 @@ export default function App() {
   const executeSnooze = async (med, minutes) => {
     if (!Notifications || !Notifications.scheduleNotificationAsync) return;
     try {
-      // Alle sichtbaren Benachrichtigungen sofort verwerfen
       await Notifications.dismissAllNotificationsAsync();
 
       await Notifications.scheduleNotificationAsync({
@@ -865,7 +864,7 @@ export default function App() {
                       style={[styles.smallBtn, styles.blueBtn]}
                       onPress={() => openEditModal(item)}
                     >
-                      <Text style={styles.smallBtnTextBlue}>✏️ EDIT</Text>
+                      <Text style={styles.smallBtnTextBlue}>✏️ BEARBEITEN</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -1051,7 +1050,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: HILFE & BEDIENUNGSANLEITUNG (AKTUALISIERT) */}
+      {/* MODAL: HILFE & BEDIENUNGSANLEITUNG */}
       <Modal visible={guideModalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent, maxHeight: '85%' }]}>
@@ -1062,7 +1061,7 @@ export default function App() {
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>1. PUSH-BENACHRICHTIGUNGEN & HINTERGRUND</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Alarme funktionieren zuverlässig. Wenn eine Benachrichtigung eingeht, kannst du direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" tippen. Die Nachricht schließt sich dadurch sofort automatisch in der Statusleiste – selbst wenn die App im Task-Manager geschlossen war.
+                  Alarme funktionieren zuverlässig. Wenn eine Benachrichtigung eingeht, kannst du direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" tippen. Das Pop-up in der Statusleiste schließt sich dadurch sofort automatisch – selbst wenn die App im Hintergrund oder Task-Manager geschlossen war.
                 </Text>
               </View>
 
@@ -1077,7 +1076,7 @@ export default function App() {
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>3. MEDIKAMENTE ANLEGEN & BEARBEITEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
                   • <Text style={{ fontWeight: '800' }}>Neu:</Text> Tippe auf "➕ NEU". Die Uhrzeit (HH:MM) formatiert sich automatisch beim Tippen.{'\n'}
-                  • <Text style={{ fontWeight: '800' }}>Bearbeiten/Löschen:</Text> Nutze die Buttons "✏️ EDIT" oder "🗑️ LÖSCHEN" direkt auf der Medikamentenkarte.
+                  • <Text style={{ fontWeight: '800' }}>Bearbeiten/Löschen:</Text> Nutze die Buttons "✏️ BEARBEITEN" oder "🗑️ LÖSCHEN" direkt auf der Medikamentenkarte.
                 </Text>
               </View>
 
