@@ -61,6 +61,9 @@ export default function App() {
   const [meds, setMeds] = useState([]);
   const [logs, setLogs] = useState([]);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('MEDS'); // 'MEDS' oder 'STATS'
+
+  // Modals
   const [modalVisible, setModalVisible] = useState(false);
   const [backupModalVisible, setBackupModalVisible] = useState(false);
   const [snoozeModalVisible, setSnoozeModalVisible] = useState(false);
@@ -93,7 +96,6 @@ export default function App() {
   const setupNotificationActions = async () => {
     if (!Notifications) return;
     try {
-      // Erweiterte Push-Aktionen: +30m, +60m & Freie Zeitwahl (öffnet App Modal)
       await Notifications.setNotificationCategoryAsync('med_actions', [
         {
           identifier: 'ACTION_TAKEN',
@@ -113,7 +115,7 @@ export default function App() {
         {
           identifier: 'ACTION_SNOOZE_CUSTOM',
           buttonTitle: '⚙️ Zeit wählen',
-          options: { opensAppToForeground: true }, // Öffnet App für freie Eingabe
+          options: { opensAppToForeground: true },
         },
         {
           identifier: 'ACTION_SKIP',
@@ -157,6 +159,7 @@ export default function App() {
           medId: targetMed.id,
           title: targetMed.title,
           dosage: targetMed.dosage,
+          scheduledTime: targetMed.time,
           status: 'EINGENOMMEN',
           timestamp: new Date().toISOString(),
         };
@@ -168,7 +171,6 @@ export default function App() {
       } else if (actionId === 'ACTION_SNOOZE_60') {
         await executeSnooze(targetMed, 60);
       } else if (actionId === 'ACTION_SNOOZE_CUSTOM') {
-        // Öffnet das Schlummer-Modal in der App zur freien Zeitwahl
         setSelectedMedForSnooze(targetMed);
         setSnoozeModalVisible(true);
       } else if (actionId === 'ACTION_SKIP') {
@@ -177,6 +179,7 @@ export default function App() {
           medId: targetMed.id,
           title: targetMed.title,
           dosage: targetMed.dosage,
+          scheduledTime: targetMed.time,
           status: 'ÜBERSPRUNGEN',
           timestamp: new Date().toISOString(),
         };
@@ -368,6 +371,7 @@ export default function App() {
       medId: med.id,
       title: med.title,
       dosage: med.dosage,
+      scheduledTime: med.time,
       status: 'EINGENOMMEN',
       timestamp: new Date().toISOString(),
     };
@@ -391,6 +395,7 @@ export default function App() {
               medId: med.id,
               title: med.title,
               dosage: med.dosage,
+              scheduledTime: med.time,
               status: 'ÜBERSPRUNGEN',
               timestamp: new Date().toISOString(),
             };
@@ -508,6 +513,48 @@ export default function App() {
     }
   };
 
+  // STATISTIK-BERECHNUNGEN
+  const calculateStatistics = () => {
+    const totalLogs = logs.length;
+    const takenLogs = logs.filter((l) => l.status === 'EINGENOMMEN');
+    const skippedLogs = logs.filter((l) => l.status === 'ÜBERSPRUNGEN');
+
+    const adherenceRate = totalLogs > 0 ? Math.round((takenLogs.length / totalLogs) * 100) : 0;
+
+    let totalDelayMinutes = 0;
+    let validDelayCount = 0;
+
+    takenLogs.forEach((log) => {
+      if (log.scheduledTime && log.timestamp) {
+        const takenDate = new Date(log.timestamp);
+        const [targetHours, targetMinutes] = log.scheduledTime.split(':').map(Number);
+
+        const scheduledDate = new Date(takenDate);
+        scheduledDate.setHours(targetHours || 0, targetMinutes || 0, 0, 0);
+
+        const diffMs = takenDate.getTime() - scheduledDate.getTime();
+        const diffMinutes = Math.round(diffMs / (1000 * 60));
+
+        if (diffMinutes > 0) {
+          totalDelayMinutes += diffMinutes;
+        }
+        validDelayCount++;
+      }
+    });
+
+    const averageDelay = validDelayCount > 0 ? Math.round(totalDelayMinutes / validDelayCount) : 0;
+
+    return {
+      totalLogs,
+      takenCount: takenLogs.length,
+      skippedCount: skippedLogs.length,
+      adherenceRate,
+      averageDelay,
+    };
+  };
+
+  const stats = calculateStatistics();
+
   // FARBPALETTEN
   const theme = isDarkMode ? darkColors : lightColors;
 
@@ -541,118 +588,239 @@ export default function App() {
         <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
       </View>
 
-      {/* AKTIONSBUTTONS */}
-      <View style={styles.actionRow}>
+      {/* KLAR BESCHRIFTETE TAB-NAVIGATIONSLEISTE */}
+      <View style={styles.mainTabRow}>
         <TouchableOpacity
-          style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-          onPress={() => setModalVisible(true)}
+          style={[
+            styles.mainTabBtn,
+            { borderColor: theme.cardBorder, backgroundColor: activeTab === 'MEDS' ? theme.accent : theme.tabInactiveBg }
+          ]}
+          onPress={() => setActiveTab('MEDS')}
         >
-          <Text style={[styles.btnText, { color: theme.btnTextColor }]}>➕ NEU</Text>
+          <Text
+            style={[
+              styles.mainTabText,
+              { color: activeTab === 'MEDS' ? theme.btnTextColor : theme.textMain }
+            ]}
+          >
+            💊 MEDIKAMENTE
+          </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
-          style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-          onPress={exportBackup}
+          style={[
+            styles.mainTabBtn,
+            { borderColor: theme.cardBorder, backgroundColor: activeTab === 'STATS' ? theme.accent : theme.tabInactiveBg }
+          ]}
+          onPress={() => setActiveTab('STATS')}
         >
-          <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>💾 SICHERN</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-          onPress={importBackupFile}
-        >
-          <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📂 LADEN</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-          onPress={() => setGuideModalVisible(true)}
-        >
-          <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📖 HILFE</Text>
+          <Text
+            style={[
+              styles.mainTabText,
+              { color: activeTab === 'STATS' ? theme.btnTextColor : theme.textMain }
+            ]}
+          >
+            📊 STATISTIK
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* MEDIKAMENTENLISTE */}
-      <FlatList
-        data={meds}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
-          <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
-            <Text style={[styles.emptyText, { color: theme.textSub }]}>
-              [ 📭 KEINE MEDIKAMENTE ERFASST ]
-            </Text>
-            <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
-              Tippe oben auf "➕ NEU", um einen Eintrag zu erstellen.
-            </Text>
+      {/* TAB 1: MEDIKAMENTE */}
+      {activeTab === 'MEDS' ? (
+        <>
+          {/* AKTIONSBUTTONS */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
+              onPress={() => setModalVisible(true)}
+            >
+              <Text style={[styles.btnText, { color: theme.btnTextColor }]}>➕ NEU</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
+              onPress={exportBackup}
+            >
+              <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>💾 SICHERN</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
+              onPress={importBackupFile}
+            >
+              <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📂 LADEN</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
+              onPress={() => setGuideModalVisible(true)}
+            >
+              <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📖 HILFE</Text>
+            </TouchableOpacity>
           </View>
-        }
-        renderItem={({ item }) => (
-          <View
-            style={[
-              styles.card,
-              { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
-              !item.active && styles.cardInactive
-            ]}
-          >
-            <View style={styles.cardHeader}>
-              <View style={{ flex: 1 }}>
-                <View style={styles.timeBadge}>
-                  <Text style={styles.cardTime}>⏰ {item.time} UHR</Text>
-                </View>
-                <Text style={[styles.cardTitle, { color: theme.textMain }]}>💊 {item.title.toUpperCase()}</Text>
-              </View>
-              <Switch
-                trackColor={{ false: '#CBD5E1', true: '#00F0FF' }}
-                thumbColor={item.active ? (isDarkMode ? '#00F0FF' : '#0F172A') : '#64748B'}
-                onValueChange={() => toggleMedication(item.id)}
-                value={item.active}
-              />
-            </View>
 
-            <View style={styles.cardBody}>
-              <Text style={[styles.cardSub, { color: theme.textSub }]}>
-                🧪 DOSIERUNG: <Text style={{ color: theme.textMain, fontWeight: '800' }}>{item.dosage}</Text>
-              </Text>
-              {item.notes ? (
-                <Text style={[styles.cardNotes, { color: theme.textMuted }]}>
-                  📝 HINWEIS: {item.notes}
+          {/* MEDIKAMENTENLISTE */}
+          <FlatList
+            data={meds}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContainer}
+            ListEmptyComponent={
+              <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+                <Text style={[styles.emptyText, { color: theme.textSub }]}>
+                  [ 📭 KEINE MEDIKAMENTE ERFASST ]
                 </Text>
-              ) : null}
+                <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
+                  Tippe oben auf "➕ NEU", um einen Eintrag zu erstellen.
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
+                  !item.active && styles.cardInactive
+                ]}
+              >
+                <View style={styles.cardHeader}>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.timeBadge}>
+                      <Text style={styles.cardTime}>⏰ {item.time} UHR</Text>
+                    </View>
+                    <Text style={[styles.cardTitle, { color: theme.textMain }]}>💊 {item.title.toUpperCase()}</Text>
+                  </View>
+                  <Switch
+                    trackColor={{ false: '#CBD5E1', true: '#00F0FF' }}
+                    thumbColor={item.active ? (isDarkMode ? '#00F0FF' : '#0F172A') : '#64748B'}
+                    onValueChange={() => toggleMedication(item.id)}
+                    value={item.active}
+                  />
+                </View>
+
+                <View style={styles.cardBody}>
+                  <Text style={[styles.cardSub, { color: theme.textSub }]}>
+                    🧪 DOSIERUNG: <Text style={{ color: theme.textMain, fontWeight: '800' }}>{item.dosage}</Text>
+                  </Text>
+                  {item.notes ? (
+                    <Text style={[styles.cardNotes, { color: theme.textMuted }]}>
+                      📝 HINWEIS: {item.notes}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.cardFooter}>
+                  <TouchableOpacity
+                    style={[styles.smallBtn, styles.greenBtn]}
+                    onPress={() => markAsTaken(item)}
+                  >
+                    <Text style={styles.smallBtnTextGreen}>✅ NEHMEN</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.smallBtn, styles.amberBtn]}
+                    onPress={() => {
+                      setSelectedMedForSnooze(item);
+                      setSnoozeModalVisible(true);
+                    }}
+                  >
+                    <Text style={styles.smallBtnTextAmber}>⏱️ SPÄTER</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.smallBtn, styles.purpleBtn]}
+                    onPress={() => skipMedication(item)}
+                  >
+                    <Text style={styles.smallBtnTextPurple}>⏭️ ÜBERSPRINGEN</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.smallBtn, styles.redBtn]}
+                    onPress={() => deleteMedication(item.id)}
+                  >
+                    <Text style={styles.smallBtnTextRed}>🗑️ LÖSCHEN</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          />
+        </>
+      ) : (
+        /* TAB 2: BESCHRIFTETE STATISTIK */
+        <ScrollView contentContainerStyle={styles.statsContainer}>
+          <Text style={[styles.statsSectionTitle, { color: theme.accent }]}>
+            📊 AUSWERTUNG & ANALYSE
+          </Text>
+
+          {/* KARTEN-GRID */}
+          <View style={styles.statsGrid}>
+            <View style={[styles.statCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+              <Text style={styles.statIcon}>📈</Text>
+              <Text style={[styles.statValue, { color: '#10B981' }]}>
+                {stats.adherenceRate}%
+              </Text>
+              <Text style={[styles.statTitle, { color: theme.textMain }]}>EINNAHMEQUOTE</Text>
+              <Text style={[styles.statSubText, { color: theme.textMuted }]}>
+                {stats.takenCount} von {stats.totalLogs} Dosen eingenommen ({stats.skippedCount} übersprungen).
+              </Text>
             </View>
 
-            <View style={styles.cardFooter}>
-              <TouchableOpacity
-                style={[styles.smallBtn, styles.greenBtn]}
-                onPress={() => markAsTaken(item)}
-              >
-                <Text style={styles.smallBtnTextGreen}>✅ NEHMEN</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.smallBtn, styles.amberBtn]}
-                onPress={() => {
-                  setSelectedMedForSnooze(item);
-                  setSnoozeModalVisible(true);
-                }}
-              >
-                <Text style={styles.smallBtnTextAmber}>⏱️ SPÄTER</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.smallBtn, styles.purpleBtn]}
-                onPress={() => skipMedication(item)}
-              >
-                <Text style={styles.smallBtnTextPurple}>⏭️ ÜBERSPRINGEN</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.smallBtn, styles.redBtn]}
-                onPress={() => deleteMedication(item.id)}
-              >
-                <Text style={styles.smallBtnTextRed}>🗑️ LÖSCHEN</Text>
-              </TouchableOpacity>
+            <View style={[styles.statCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+              <Text style={styles.statIcon}>⏱️</Text>
+              <Text style={[styles.statValue, { color: '#F59E0B' }]}>
+                {stats.averageDelay} <Text style={{ fontSize: 16 }}>Min.</Text>
+              </Text>
+              <Text style={[styles.statTitle, { color: theme.textMain }]}>DURCHSCHN. VERSPÄTUNG</Text>
+              <Text style={[styles.statSubText, { color: theme.textMuted }]}>
+                Durchschnittliche Abweichung zur eingestellten Uhrzeit.
+              </Text>
             </View>
           </View>
-        )}
-      />
+
+          {/* HISTORIE */}
+          <Text style={[styles.statsSectionTitle, { color: theme.textMain, marginTop: 24 }]}>
+            📋 HISTORIE ({logs.length} EINTRÄGE)
+          </Text>
+
+          {logs.length === 0 ? (
+            <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+              <Text style={[styles.emptyText, { color: theme.textSub }]}>
+                [ 📭 NOCH KEINE STATISTIK-DATEN ]
+              </Text>
+              <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
+                Sobald du Medikamente einnimmst oder überspringst, erscheinen hier Berichte.
+              </Text>
+            </View>
+          ) : (
+            logs.map((log) => (
+              <View
+                key={log.id}
+                style={[
+                  styles.logItem,
+                  { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.logTitle, { color: theme.textMain }]}>💊 {log.title}</Text>
+                  <Text style={[styles.logDate, { color: theme.textMuted }]}>
+                    {new Date(log.timestamp).toLocaleString('de-DE')} | Soll: {log.scheduledTime || '08:00'} Uhr
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    log.status === 'EINGENOMMEN' ? styles.badgeTaken : styles.badgeSkipped
+                  ]}
+                >
+                  <Text
+                    style={
+                      log.status === 'EINGENOMMEN' ? styles.badgeTextTaken : styles.badgeTextSkipped
+                    }
+                  >
+                    {log.status}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      )}
 
       {/* ENTWICKLER-INFO FOOTER */}
       <View style={[styles.developerFooter, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
@@ -703,9 +871,9 @@ export default function App() {
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. PUSH-BENACHRICHTIGUNGEN</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. STATISTIK TAB</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  In eingehenden Push-Nachrichten stehen Schnellauswahlen (+30 Min, +60 Min) sowie "⚙️ Zeit wählen" (für freie Minuteneingabe) bereit.
+                  Über die obere Tab-Leiste gelangst du in die Statistik. Dort wird dir die Einnahmequote in % und die durchschnittliche Verspätung in Minuten angezeigt.
                 </Text>
               </View>
 
@@ -728,7 +896,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: ERINNERUNG VERZÖGERN (SCHNELLAUSWAHL + FREIE EINGABE) */}
+      {/* MODAL: ERINNERUNG VERZÖGERN */}
       <Modal visible={snoozeModalVisible} animationType="fade" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
@@ -752,7 +920,6 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
-            {/* FREIE MINUTENEINGABE */}
             <Text style={[styles.inputLabel, { color: theme.textSub, marginTop: 16 }]}>⚙️ FREI WÄHLBAR (MINUTEN)</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TextInput
@@ -886,12 +1053,13 @@ export default function App() {
 const lightColors = {
   bg: '#F8FAFC',
   cardBg: '#FFFFFF',
-  cardBorder: '#E2E8F0',
+  cardBorder: '#CBD5E1',
   textMain: '#0F172A',
   textSub: '#475569',
   textMuted: '#64748B',
   accent: '#0284C7',
   btnTextColor: '#FFFFFF',
+  tabInactiveBg: '#E2E8F0',
   outlineBorder: '#0284C7',
   outlineBg: 'rgba(2, 132, 199, 0.06)',
   outlineText: '#0284C7',
@@ -909,6 +1077,7 @@ const darkColors = {
   textMuted: '#64748B',
   accent: '#00F0FF',
   btnTextColor: '#030712',
+  tabInactiveBg: '#0F172A',
   outlineBorder: '#38BDF8',
   outlineBg: 'rgba(56, 189, 248, 0.05)',
   outlineText: '#38BDF8',
@@ -924,7 +1093,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -955,10 +1124,31 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
+  mainTabRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 6,
+    gap: 8,
+  },
+  mainTabBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 1,
+  },
+  mainTabText: {
+    fontWeight: '900',
+    fontSize: 12,
+    letterSpacing: 0.8,
+  },
   actionRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    marginVertical: 12,
+    marginVertical: 10,
     gap: 6,
   },
   cyanBtn: {
@@ -1091,6 +1281,90 @@ const styles = StyleSheet.create({
   smallBtnTextAmber: { color: '#F59E0B', fontSize: 8.5, fontWeight: '800' },
   smallBtnTextPurple: { color: '#A855F7', fontSize: 8.5, fontWeight: '800' },
   smallBtnTextRed: { color: '#EF4444', fontSize: 8.5, fontWeight: '800' },
+
+  // STATS STYLES
+  statsContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  statsSectionTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginVertical: 10,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+  },
+  statIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  statTitle: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  statSubText: {
+    fontSize: 9,
+    marginTop: 4,
+    textAlign: 'center',
+    lineHeight: 12,
+  },
+  logItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 6,
+    padding: 12,
+    marginBottom: 8,
+  },
+  logTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  logDate: {
+    fontSize: 10,
+    marginTop: 2,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  badgeTaken: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  badgeSkipped: {
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+  },
+  badgeTextTaken: {
+    color: '#10B981',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  badgeTextSkipped: {
+    color: '#A855F7',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+
   developerFooter: {
     borderTopWidth: 1,
     paddingVertical: 10,
