@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -60,29 +60,41 @@ const STORAGE_KEY_THEME = '@meds_theme_v1';
 export default function App() {
   const [meds, setMeds] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [isDarkMode, setIsDarkMode] = useState(false); // Standard: Hell-Modus
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [backupModalVisible, setBackupModalVisible] = useState(false);
   const [snoozeModalVisible, setSnoozeModalVisible] = useState(false);
   const [guideModalVisible, setGuideModalVisible] = useState(false);
   const [selectedMedForSnooze, setSelectedMedForSnooze] = useState(null);
   const [rawJsonText, setRawJsonText] = useState('');
-  
+
   // Formular-Zustand
   const [title, setTitle] = useState('');
   const [dosage, setDosage] = useState('');
   const [time, setTime] = useState('08:00');
   const [notes, setNotes] = useState('');
 
+  // Verwende den Expo Notifications Hook für schnelle Antwortreaktion
+  const lastNotificationResponse = Notifications?.useLastNotificationResponse
+    ? Notifications.useLastNotificationResponse()
+    : null;
+
   useEffect(() => {
     loadData();
     setupNotificationActions();
   }, []);
 
+  // Auf Interaktionen mit Push-Benachrichtigungen reagieren
+  useEffect(() => {
+    if (lastNotificationResponse) {
+      handleNotificationAction(lastNotificationResponse);
+    }
+  }, [lastNotificationResponse]);
+
   const setupNotificationActions = async () => {
     if (!Notifications) return;
     try {
-      // Push-Kategorien für Aktions-Buttons
+      // Definieren der Push-Kategorien mit Umbenennung zu "Überspringen"
       await Notifications.setNotificationCategoryAsync('med_actions', [
         {
           identifier: 'ACTION_TAKEN',
@@ -96,64 +108,14 @@ export default function App() {
         },
         {
           identifier: 'ACTION_SKIP',
-          buttonTitle: '⏭️ Weiter',
+          buttonTitle: '⏭️ Überspringen',
           options: { opensAppToForeground: false },
         },
       ]);
 
-      // Listener für Aktionen aus den Push-Nachrichten
-      Notifications.addNotificationResponseReceivedListener(async (response) => {
-        const actionId = response.actionIdentifier;
-        const notificationData = response.notification.request.content.data;
-        const medId = notificationData?.medId;
-
-        if (!medId) return;
-
-        const storedMeds = await AsyncStorage.getItem(STORAGE_KEY_MEDS);
-        const currentMeds = storedMeds ? JSON.parse(storedMeds) : [];
-        const targetMed = currentMeds.find((m) => m.id === medId);
-
-        if (!targetMed) return;
-
-        const storedLogs = await AsyncStorage.getItem(STORAGE_KEY_LOGS);
-        const currentLogs = storedLogs ? JSON.parse(storedLogs) : [];
-
-        if (actionId === 'ACTION_TAKEN') {
-          const newLog = {
-            id: Date.now().toString(),
-            medId: targetMed.id,
-            title: targetMed.title,
-            dosage: targetMed.dosage,
-            status: 'EINGENOMMEN',
-            timestamp: new Date().toISOString(),
-          };
-          const updatedLogs = [newLog, ...currentLogs];
-          await AsyncStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
-          setLogs(updatedLogs);
-        } else if (actionId === 'ACTION_SNOOZE') {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `⏰ VERZÖGERTER ALARM: ${targetMed.title}`,
-              body: `Erinnerung um 30 Minuten verzögert. Dosis: ${targetMed.dosage}`,
-              sound: true,
-              categoryIdentifier: 'med_actions',
-              data: { medId: targetMed.id, medTitle: targetMed.title },
-            },
-            trigger: { seconds: 30 * 60 },
-          });
-        } else if (actionId === 'ACTION_SKIP') {
-          const newLog = {
-            id: Date.now().toString(),
-            medId: targetMed.id,
-            title: targetMed.title,
-            dosage: targetMed.dosage,
-            status: 'ÜBERSPRUNGEN',
-            timestamp: new Date().toISOString(),
-          };
-          const updatedLogs = [newLog, ...currentLogs];
-          await AsyncStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
-          setLogs(updatedLogs);
-        }
+      // Zusätzlicher Fallback-Listener
+      Notifications.addNotificationResponseReceivedListener((response) => {
+        handleNotificationAction(response);
       });
 
       await Notifications.requestPermissionsAsync();
@@ -162,12 +124,72 @@ export default function App() {
     }
   };
 
+  const handleNotificationAction = async (response) => {
+    const actionId = response.actionIdentifier;
+    if (!actionId || actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+
+    const notificationData = response.notification.request.content.data;
+    const medId = notificationData?.medId;
+
+    if (!medId) return;
+
+    try {
+      const storedMeds = await AsyncStorage.getItem(STORAGE_KEY_MEDS);
+      const currentMeds = storedMeds ? JSON.parse(storedMeds) : [];
+      const targetMed = currentMeds.find((m) => m.id === medId);
+
+      if (!targetMed) return;
+
+      const storedLogs = await AsyncStorage.getItem(STORAGE_KEY_LOGS);
+      const currentLogs = storedLogs ? JSON.parse(storedLogs) : [];
+
+      if (actionId === 'ACTION_TAKEN') {
+        const newLog = {
+          id: Date.now().toString(),
+          medId: targetMed.id,
+          title: targetMed.title,
+          dosage: targetMed.dosage,
+          status: 'EINGENOMMEN',
+          timestamp: new Date().toISOString(),
+        };
+        const updatedLogs = [newLog, ...currentLogs];
+        await AsyncStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
+        setLogs(updatedLogs);
+      } else if (actionId === 'ACTION_SNOOZE') {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `⏰ VERZÖGERTER ALARM: ${targetMed.title}`,
+            body: `Erinnerung um 30 Minuten verzögert. Dosis: ${targetMed.dosage}`,
+            sound: true,
+            categoryIdentifier: 'med_actions',
+            data: { medId: targetMed.id, medTitle: targetMed.title },
+          },
+          trigger: { seconds: 30 * 60 },
+        });
+      } else if (actionId === 'ACTION_SKIP') {
+        const newLog = {
+          id: Date.now().toString(),
+          medId: targetMed.id,
+          title: targetMed.title,
+          dosage: targetMed.dosage,
+          status: 'ÜBERSPRUNGEN',
+          timestamp: new Date().toISOString(),
+        };
+        const updatedLogs = [newLog, ...currentLogs];
+        await AsyncStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
+        setLogs(updatedLogs);
+      }
+    } catch (e) {
+      console.log('Fehler bei Verarbeitung der Push-Aktion:', e);
+    }
+  };
+
   const loadData = async () => {
     try {
       const storedMeds = await AsyncStorage.getItem(STORAGE_KEY_MEDS);
       const storedLogs = await AsyncStorage.getItem(STORAGE_KEY_LOGS);
       const storedTheme = await AsyncStorage.getItem(STORAGE_KEY_THEME);
-      
+
       if (storedMeds) setMeds(JSON.parse(storedMeds));
       if (storedLogs) setLogs(JSON.parse(storedLogs));
       if (storedTheme !== null) setIsDarkMode(JSON.parse(storedTheme));
@@ -374,7 +396,7 @@ export default function App() {
     );
   };
 
-  // SICHERUNG & LADEN OVER THE AIR / DATEI
+  // BACKUP DIREKT ALS JSON-DATEI AUF HANDY SPEICHERN
   const exportBackup = async () => {
     const backupData = {
       version: 1,
@@ -383,14 +405,30 @@ export default function App() {
       logs: logs,
     };
     const jsonStr = JSON.stringify(backupData, null, 2);
-
     setRawJsonText(jsonStr);
 
     try {
+      // Android: Speicherdialog öffnen, um Datei direkt im Wunschordner abzulegen
+      if (Platform.OS === 'android' && FileSystem && FileSystem.StorageAccessFramework) {
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        if (permissions.granted) {
+          const fileName = `medikamentenerinnerung_sicherung_${new Date().toISOString().slice(0, 10)}.json`;
+          const uri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            fileName,
+            'application/json'
+          );
+          await FileSystem.writeAsStringAsync(uri, jsonStr, { encoding: FileSystem.EncodingType.UTF8 });
+          Alert.alert('💾 ERFOLG', 'Sicherungsdatei (.json) wurde erfolgreich auf deinem Handy gespeichert.');
+          return;
+        }
+      }
+
+      // iOS / Fallback
       if (FileSystem && FileSystem.documentDirectory && Sharing) {
         const filePath = `${FileSystem.documentDirectory}medikamentenerinnerung_sicherung.json`;
         await FileSystem.writeAsStringAsync(filePath, jsonStr, { encoding: FileSystem.EncodingType.UTF8 });
-        
+
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(filePath, { mimeType: 'application/json', dialogTitle: 'Sicherungsdatei speichern' });
           return;
@@ -480,7 +518,7 @@ export default function App() {
           <Text style={[styles.headerTitle, { color: theme.textMain }]} adjustsFontSizeToFit numberOfLines={1}>
             💊 MEDIKAMENTENERINNERUNG
           </Text>
-          
+
           {/* DUNKELMODUS-SCHALTER */}
           <View style={styles.themeToggleContainer}>
             <Text style={[styles.themeLabel, { color: theme.textSub }]}>
@@ -596,7 +634,7 @@ export default function App() {
                 style={[styles.smallBtn, styles.purpleBtn]}
                 onPress={() => skipMedication(item)}
               >
-                <Text style={styles.smallBtnTextPurple}>⏭️ WEITER</Text>
+                <Text style={styles.smallBtnTextPurple}>⏭️ ÜBERSPRINGEN</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -653,7 +691,7 @@ export default function App() {
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
                   • ✅ NEHMEN: Markiert die Dosis als eingenommen.{'\n'}
                   • ⏱️ SPÄTER: Verschiebt den Alarm um 15, 30, 45 oder 60 Minuten.{'\n'}
-                  • ⏭️ WEITER: Überspringt die Dosis im Protokoll.{'\n'}
+                  • ⏭️ ÜBERSPRINGEN: Überspringt die Dosis im Protokoll.{'\n'}
                   • 🗑️ LÖSCHEN: Entfernt den Eintrag dauerhaft.
                 </Text>
               </View>
@@ -661,15 +699,15 @@ export default function App() {
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>5. PUSH-BENACHRICHTIGUNGEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  In eingehenden Push-Nachrichten kann direkt auf "Nehmen", "Später (+30 Min)" oder "Weiter" getippt werden, ohne die App öffnen zu müssen.
+                  In eingehenden Push-Nachrichten kann direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" getippt werden.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>6. DATENSICHERUNG</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  • 💾 SICHERN: Exportiert alle Daten als Backup-Datei zum Teilen oder Speichern.{'\n'}
-                  • 📂 LADEN: Öffnet eine Sicherungsdatei zum Wiederherstellen aller Daten.
+                  • 💾 SICHERN: Speichert die Daten direkt als `.json`-Datei im Speicher deines Handys.{'\n'}
+                  • 📂 LADEN: Öffnet eine `.json`-Sicherungsdatei zum Wiederherstellen aller Daten.
                 </Text>
               </View>
             </ScrollView>
@@ -1024,10 +1062,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EF4444',
   },
-  smallBtnTextGreen: { color: '#10B981', fontSize: 9, fontWeight: '800' },
-  smallBtnTextAmber: { color: '#F59E0B', fontSize: 9, fontWeight: '800' },
-  smallBtnTextPurple: { color: '#A855F7', fontSize: 9, fontWeight: '800' },
-  smallBtnTextRed: { color: '#EF4444', fontSize: 9, fontWeight: '800' },
+  smallBtnTextGreen: { color: '#10B981', fontSize: 8.5, fontWeight: '800' },
+  smallBtnTextAmber: { color: '#F59E0B', fontSize: 8.5, fontWeight: '800' },
+  smallBtnTextPurple: { color: '#A855F7', fontSize: 8.5, fontWeight: '800' },
+  smallBtnTextRed: { color: '#EF4444', fontSize: 8.5, fontWeight: '800' },
   developerFooter: {
     borderTopWidth: 1,
     paddingVertical: 10,
