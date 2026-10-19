@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -66,6 +66,7 @@ export default function App() {
   const [snoozeModalVisible, setSnoozeModalVisible] = useState(false);
   const [guideModalVisible, setGuideModalVisible] = useState(false);
   const [selectedMedForSnooze, setSelectedMedForSnooze] = useState(null);
+  const [customSnoozeMinutes, setCustomSnoozeMinutes] = useState('');
   const [rawJsonText, setRawJsonText] = useState('');
 
   // Formular-Zustand
@@ -74,7 +75,6 @@ export default function App() {
   const [time, setTime] = useState('08:00');
   const [notes, setNotes] = useState('');
 
-  // Verwende den Expo Notifications Hook für schnelle Antwortreaktion
   const lastNotificationResponse = Notifications?.useLastNotificationResponse
     ? Notifications.useLastNotificationResponse()
     : null;
@@ -84,7 +84,6 @@ export default function App() {
     setupNotificationActions();
   }, []);
 
-  // Auf Interaktionen mit Push-Benachrichtigungen reagieren
   useEffect(() => {
     if (lastNotificationResponse) {
       handleNotificationAction(lastNotificationResponse);
@@ -94,7 +93,7 @@ export default function App() {
   const setupNotificationActions = async () => {
     if (!Notifications) return;
     try {
-      // Definieren der Push-Kategorien mit Umbenennung zu "Überspringen"
+      // Erweiterte Push-Aktionen: +30m, +60m & Freie Zeitwahl (öffnet App Modal)
       await Notifications.setNotificationCategoryAsync('med_actions', [
         {
           identifier: 'ACTION_TAKEN',
@@ -102,9 +101,19 @@ export default function App() {
           options: { opensAppToForeground: false },
         },
         {
-          identifier: 'ACTION_SNOOZE',
-          buttonTitle: '⏱️ Später (+30 Min)',
+          identifier: 'ACTION_SNOOZE_30',
+          buttonTitle: '⏱️ +30 Min',
           options: { opensAppToForeground: false },
+        },
+        {
+          identifier: 'ACTION_SNOOZE_60',
+          buttonTitle: '⏱️ +60 Min',
+          options: { opensAppToForeground: false },
+        },
+        {
+          identifier: 'ACTION_SNOOZE_CUSTOM',
+          buttonTitle: '⚙️ Zeit wählen',
+          options: { opensAppToForeground: true }, // Öffnet App für freie Eingabe
         },
         {
           identifier: 'ACTION_SKIP',
@@ -113,7 +122,6 @@ export default function App() {
         },
       ]);
 
-      // Zusätzlicher Fallback-Listener
       Notifications.addNotificationResponseReceivedListener((response) => {
         handleNotificationAction(response);
       });
@@ -155,17 +163,14 @@ export default function App() {
         const updatedLogs = [newLog, ...currentLogs];
         await AsyncStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
         setLogs(updatedLogs);
-      } else if (actionId === 'ACTION_SNOOZE') {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: `⏰ VERZÖGERTER ALARM: ${targetMed.title}`,
-            body: `Erinnerung um 30 Minuten verzögert. Dosis: ${targetMed.dosage}`,
-            sound: true,
-            categoryIdentifier: 'med_actions',
-            data: { medId: targetMed.id, medTitle: targetMed.title },
-          },
-          trigger: { seconds: 30 * 60 },
-        });
+      } else if (actionId === 'ACTION_SNOOZE_30') {
+        await executeSnooze(targetMed, 30);
+      } else if (actionId === 'ACTION_SNOOZE_60') {
+        await executeSnooze(targetMed, 60);
+      } else if (actionId === 'ACTION_SNOOZE_CUSTOM') {
+        // Öffnet das Schlummer-Modal in der App zur freien Zeitwahl
+        setSelectedMedForSnooze(targetMed);
+        setSnoozeModalVisible(true);
       } else if (actionId === 'ACTION_SKIP') {
         const newLog = {
           id: Date.now().toString(),
@@ -182,6 +187,39 @@ export default function App() {
     } catch (e) {
       console.log('Fehler bei Verarbeitung der Push-Aktion:', e);
     }
+  };
+
+  const executeSnooze = async (med, minutes) => {
+    if (!Notifications || !Notifications.scheduleNotificationAsync) return;
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `⏰ VERZÖGERTER ALARM: ${med.title}`,
+          body: `Erinnerung um ${minutes} Minuten verzögert. Dosis: ${med.dosage}`,
+          sound: true,
+          categoryIdentifier: 'med_actions',
+          data: { medId: med.id, medTitle: med.title },
+        },
+        trigger: { seconds: minutes * 60 },
+      });
+      Alert.alert('⏳ SCHLUMMERN AKTIV', `Erinnerung für ${med.title} um ${minutes} Minuten verschoben.`);
+    } catch (e) {
+      console.log('Fehler beim Schlummern:', e);
+    }
+  };
+
+  const handleCustomSnoozeSubmit = () => {
+    const mins = parseInt(customSnoozeMinutes, 10);
+    if (isNaN(mins) || mins <= 0) {
+      Alert.alert('⚠️ FEHLER', 'Bitte gib eine gültige Minutenanzahl ein.');
+      return;
+    }
+    if (selectedMedForSnooze) {
+      executeSnooze(selectedMedForSnooze, mins);
+    }
+    setCustomSnoozeMinutes('');
+    setSnoozeModalVisible(false);
+    setSelectedMedForSnooze(null);
   };
 
   const loadData = async () => {
@@ -239,36 +277,6 @@ export default function App() {
       console.log('Fehler beim Planen der Benachrichtigung:', e);
       return null;
     }
-  };
-
-  const snoozeNotification = async (minutes) => {
-    if (!selectedMedForSnooze) return;
-
-    if (Notifications && Notifications.scheduleNotificationAsync) {
-      try {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: `⏰ VERZÖGERTER ALARM: ${selectedMedForSnooze.title}`,
-            body: `Erinnerung um ${minutes} Minuten verzögert. Dosis: ${selectedMedForSnooze.dosage}`,
-            sound: true,
-            categoryIdentifier: 'med_actions',
-            data: { medId: selectedMedForSnooze.id, medTitle: selectedMedForSnooze.title },
-          },
-          trigger: {
-            seconds: minutes * 60,
-          },
-        });
-        Alert.alert('⏳ SCHLUMMERN AKTIV', `Erinnerung für ${selectedMedForSnooze.title} um ${minutes} Minuten verschoben.`);
-      } catch (e) {
-        console.log('Fehler beim Schlummern:', e);
-        Alert.alert('ℹ️ HINWEIS', `Erinnerung für in ${minutes} Minuten vorgemerkt.`);
-      }
-    } else {
-      Alert.alert('ℹ️ HINWEIS', `Erinnerung für in ${minutes} Minuten vorgemerkt.`);
-    }
-
-    setSnoozeModalVisible(false);
-    setSelectedMedForSnooze(null);
   };
 
   const cancelNotification = async (notifId) => {
@@ -408,7 +416,6 @@ export default function App() {
     setRawJsonText(jsonStr);
 
     try {
-      // Android: Speicherdialog öffnen, um Datei direkt im Wunschordner abzulegen
       if (Platform.OS === 'android' && FileSystem && FileSystem.StorageAccessFramework) {
         const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
         if (permissions.granted) {
@@ -424,7 +431,6 @@ export default function App() {
         }
       }
 
-      // iOS / Fallback
       if (FileSystem && FileSystem.documentDirectory && Sharing) {
         const filePath = `${FileSystem.documentDirectory}medikamentenerinnerung_sicherung.json`;
         await FileSystem.writeAsStringAsync(filePath, jsonStr, { encoding: FileSystem.EncodingType.UTF8 });
@@ -690,7 +696,7 @@ export default function App() {
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>4. ERINNERUNGS-AKTIONEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
                   • ✅ NEHMEN: Markiert die Dosis als eingenommen.{'\n'}
-                  • ⏱️ SPÄTER: Verschiebt den Alarm um 15, 30, 45 oder 60 Minuten.{'\n'}
+                  • ⏱️ SPÄTER: Verschiebt den Alarm (Schnellauswahl oder freie Minuteneingabe).{'\n'}
                   • ⏭️ ÜBERSPRINGEN: Überspringt die Dosis im Protokoll.{'\n'}
                   • 🗑️ LÖSCHEN: Entfernt den Eintrag dauerhaft.
                 </Text>
@@ -699,7 +705,7 @@ export default function App() {
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
                 <Text style={[styles.guideHeader, { color: theme.accent }]}>5. PUSH-BENACHRICHTIGUNGEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  In eingehenden Push-Nachrichten kann direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" getippt werden.
+                  In eingehenden Push-Nachrichten stehen Schnellauswahlen (+30 Min, +60 Min) sowie "⚙️ Zeit wählen" (für freie Minuteneingabe) bereit.
                 </Text>
               </View>
 
@@ -722,27 +728,46 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: ERINNERUNG VERZÖGERN */}
+      {/* MODAL: ERINNERUNG VERZÖGERN (SCHNELLAUSWAHL + FREIE EINGABE) */}
       <Modal visible={snoozeModalVisible} animationType="fade" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
             <Text style={[styles.modalTitle, { color: theme.accent }]}>⏳ ERINNERUNG VERZÖGERN</Text>
             <Text style={[styles.modalSub, { color: theme.textSub }]}>
-              Wähle die Zeitspanne für die spätere Erinnerung:
+              Wähle eine Zeitspanne oder gib eine beliebige Minutenzahl ein:
             </Text>
 
             <View style={styles.snoozeGrid}>
-              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => snoozeNotification(15)}>
+              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => { executeSnooze(selectedMedForSnooze, 15); setSnoozeModalVisible(false); }}>
                 <Text style={styles.snoozeOptionText}>⏱️ +15 MIN</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => snoozeNotification(30)}>
+              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => { executeSnooze(selectedMedForSnooze, 30); setSnoozeModalVisible(false); }}>
                 <Text style={styles.snoozeOptionText}>⏱️ +30 MIN</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => snoozeNotification(45)}>
+              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => { executeSnooze(selectedMedForSnooze, 45); setSnoozeModalVisible(false); }}>
                 <Text style={styles.snoozeOptionText}>⏱️ +45 MIN</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => snoozeNotification(60)}>
+              <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => { executeSnooze(selectedMedForSnooze, 60); setSnoozeModalVisible(false); }}>
                 <Text style={styles.snoozeOptionText}>⏱️ +60 MIN</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* FREIE MINUTENEINGABE */}
+            <Text style={[styles.inputLabel, { color: theme.textSub, marginTop: 16 }]}>⚙️ FREI WÄHLBAR (MINUTEN)</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TextInput
+                style={[styles.input, { flex: 1, backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
+                placeholder="z.B. 90"
+                placeholderTextColor={theme.placeholder}
+                keyboardType="numeric"
+                value={customSnoozeMinutes}
+                onChangeText={setCustomSnoozeMinutes}
+              />
+              <TouchableOpacity
+                style={[styles.cyanBtn, { flex: 0.8, backgroundColor: theme.accent }]}
+                onPress={handleCustomSnoozeSubmit}
+              >
+                <Text style={[styles.btnText, { color: theme.btnTextColor }]}>OK</Text>
               </TouchableOpacity>
             </View>
 
@@ -750,7 +775,7 @@ export default function App() {
               style={[styles.closeModalBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
               onPress={() => setSnoozeModalVisible(false)}
             >
-              <Text style={[styles.closeModalBtnText, { color: theme.outlineText }]}>❌ SCHLIESSEN</Text>
+              <Text style={[styles.closeModalBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
             </TouchableOpacity>
           </View>
         </View>
