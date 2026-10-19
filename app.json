@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Medikamentenerinnerung",
+    "slug": "medikamentenerinnerung",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#050B14"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ceozsteam.medikamentenerinnerung"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./icon.png",
+        "backgroundColor": "#050B14"
+      },
+      "package": "com.ceozsteam.medikamentenerinnerung"
+    },
+    "web": {
+      "favicon": "./icon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3809e1d0-9186-41bc-8cae-1f8b27bb509f"
+      }
+    },
+    "owner": "ceozs-team"
+  }
+}
