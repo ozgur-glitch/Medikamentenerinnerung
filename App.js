@@ -55,13 +55,18 @@ try {
 
 const STORAGE_KEY_MEDS = '@meds_data_v1';
 const STORAGE_KEY_LOGS = '@meds_logs_v1';
+const STORAGE_KEY_BP = '@bp_logs_v1';
 const STORAGE_KEY_THEME = '@meds_theme_v1';
 
 export default function App() {
   const [meds, setMeds] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [bpLogs, setBpLogs] = useState([]);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [activeTab, setActiveTab] = useState('MEDS'); // 'MEDS' oder 'STATS'
+  const [activeTab, setActiveTab] = useState('MEDS'); // 'MEDS', 'STATS', 'BP'
+
+  // Zeitraum-Filter für Blutdruck-Statistik ('ALL', '30', '7')
+  const [bpTimeframe, setBpTimeframe] = useState('ALL');
 
   // Modals
   const [modalVisible, setModalVisible] = useState(false);
@@ -86,6 +91,13 @@ export default function App() {
   const [time, setTime] = useState('08:00');
   const [notes, setNotes] = useState('');
 
+  // Formular-Zustand für Blutdruck
+  const [bpModalVisible, setBpModalVisible] = useState(false);
+  const [systolic, setSystolic] = useState('');
+  const [diastolic, setDiastolic] = useState('');
+  const [pulse, setPulse] = useState('');
+  const [bpNotes, setBpNotes] = useState('');
+
   const lastNotificationResponse = Notifications?.useLastNotificationResponse
     ? Notifications.useLastNotificationResponse()
     : null;
@@ -101,7 +113,6 @@ export default function App() {
     }
   }, [lastNotificationResponse]);
 
-  // Automatische Formatierung für Uhrzeit (HH:MM)
   const handleTimeChange = (text) => {
     let cleaned = text.replace(/[^0-9]/g, '');
     if (cleaned.length > 4) cleaned = cleaned.slice(0, 4);
@@ -152,7 +163,6 @@ export default function App() {
     const notificationData = notification?.request?.content?.data;
     const medId = notificationData?.medId;
 
-    // SOfortiges Verwerfen der Benachrichtigung erzwingen (auch wenn App im Hintergrund / geschlossen war)
     if (Notifications) {
       try {
         if (notification?.request?.identifier) {
@@ -160,7 +170,7 @@ export default function App() {
         }
         await Notifications.dismissAllNotificationsAsync();
       } catch (e) {
-        console.log('Fehler beim Schließen der Benachrichtigung im Hintergrund:', e);
+        console.log('Fehler beim Schließen der Benachrichtigung:', e);
       }
     }
 
@@ -249,20 +259,23 @@ export default function App() {
     try {
       const storedMeds = await AsyncStorage.getItem(STORAGE_KEY_MEDS);
       const storedLogs = await AsyncStorage.getItem(STORAGE_KEY_LOGS);
+      const storedBpLogs = await AsyncStorage.getItem(STORAGE_KEY_BP);
       const storedTheme = await AsyncStorage.getItem(STORAGE_KEY_THEME);
 
       if (storedMeds) setMeds(JSON.parse(storedMeds));
       if (storedLogs) setLogs(JSON.parse(storedLogs));
+      if (storedBpLogs) setBpLogs(JSON.parse(storedBpLogs));
       if (storedTheme !== null) setIsDarkMode(JSON.parse(storedTheme));
     } catch (e) {
       Alert.alert('⚠️ Fehler', 'Daten konnten nicht geladen werden.');
     }
   };
 
-  const saveData = async (newMeds, newLogs) => {
+  const saveData = async (newMeds, newLogs, newBpLogs = bpLogs) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY_MEDS, JSON.stringify(newMeds));
       await AsyncStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(newLogs));
+      await AsyncStorage.setItem(STORAGE_KEY_BP, JSON.stringify(newBpLogs));
     } catch (e) {
       Alert.alert('⚠️ Fehler', 'Speichern fehlgeschlagen.');
     }
@@ -539,12 +552,71 @@ export default function App() {
     );
   };
 
+  // LOGIK FÜR BLUTDRUCK
+  const saveBpEntry = () => {
+    const sys = parseInt(systolic, 10);
+    const dia = parseInt(diastolic, 10);
+    const p = pulse ? parseInt(pulse, 10) : null;
+
+    if (isNaN(sys) || isNaN(dia) || sys <= 0 || dia <= 0) {
+      Alert.alert('⚠️ FEHLER', 'Bitte gib gültige Werte für Systole und Diastole ein.');
+      return;
+    }
+
+    let status = 'NORMAL';
+    if (sys >= 140 || dia >= 90) {
+      status = 'HYPERTONIE';
+    } else if (sys >= 120 || dia >= 80) {
+      status = 'HOCH-NORMAL';
+    }
+
+    const newBpLog = {
+      id: Date.now().toString(),
+      systolic: sys,
+      diastolic: dia,
+      pulse: p,
+      status,
+      notes: bpNotes.trim(),
+      timestamp: new Date().toISOString(),
+    };
+
+    const updatedBpLogs = [newBpLog, ...bpLogs];
+    setBpLogs(updatedBpLogs);
+    saveData(meds, logs, updatedBpLogs);
+
+    setSystolic('');
+    setDiastolic('');
+    setPulse('');
+    setBpNotes('');
+    setBpModalVisible(false);
+  };
+
+  const deleteBpLog = (id) => {
+    Alert.alert(
+      '🗑️ LÖSCHEN',
+      'Möchtest du diesen Blutdruckeintrag löschen?',
+      [
+        { text: '❌ Abbrechen', style: 'cancel' },
+        {
+          text: '🗑️ Löschen',
+          style: 'destructive',
+          onPress: () => {
+            const updated = bpLogs.filter((b) => b.id !== id);
+            setBpLogs(updated);
+            saveData(meds, logs, updated);
+          },
+        },
+      ]
+    );
+  };
+
   const exportBackup = async () => {
     const backupData = {
-      version: 1,
+      version: 2,
       exportDate: new Date().toISOString(),
       meds: meds,
       logs: logs,
+      bpLogs: bpLogs,
     };
     const jsonStr = JSON.stringify(backupData, null, 2);
     setRawJsonText(jsonStr);
@@ -560,7 +632,7 @@ export default function App() {
             'application/json'
           );
           await FileSystem.writeAsStringAsync(uri, jsonStr, { encoding: FileSystem.EncodingType.UTF8 });
-          Alert.alert('💾 ERFOLG', 'Sicherungsdatei (.json) wurde erfolgreich auf deinem Handy gespeichert.');
+          Alert.alert('💾 ERFOLG', 'Sicherungsdatei (.json) wurde erfolgreich gespeichert.');
           return;
         }
       }
@@ -604,7 +676,7 @@ export default function App() {
         setBackupModalVisible(true);
       }
     } catch (e) {
-      Alert.alert('⚠️ FEHLER', 'Sicherungsdatei konnte nicht gelesen werden. Nutze die Text-Eingabe.');
+      Alert.alert('⚠️ FEHLER', 'Sicherungsdatei konnte nicht gelesen werden.');
       setBackupModalVisible(true);
     }
   };
@@ -627,9 +699,11 @@ export default function App() {
             onPress: () => {
               const importedMeds = parsed.meds || [];
               const importedLogs = parsed.logs || [];
+              const importedBpLogs = parsed.bpLogs || [];
               setMeds(importedMeds);
               setLogs(importedLogs);
-              saveData(importedMeds, importedLogs);
+              setBpLogs(importedBpLogs);
+              saveData(importedMeds, importedLogs, importedBpLogs);
               setBackupModalVisible(false);
               setRawJsonText('');
               Alert.alert('✅ ERFOLG', 'Daten wurden erfolgreich wiederhergestellt!');
@@ -638,7 +712,7 @@ export default function App() {
         ]
       );
     } catch (e) {
-      Alert.alert('⚠️ FEHLER', 'Ungültige Struktur der Sicherungsdatei. Wiederherstellung abgebrochen.');
+      Alert.alert('⚠️ FEHLER', 'Ungültige Struktur der Sicherungsdatei.');
     }
   };
 
@@ -681,7 +755,58 @@ export default function App() {
     };
   };
 
+  // ERWEITERTE BLUTDRUCK-STATISTIK BERECHNEN
+  const calculateBpStatistics = () => {
+    const now = new Date();
+    const filteredBpLogs = bpLogs.filter((item) => {
+      if (bpTimeframe === 'ALL') return true;
+      const logDate = new Date(item.timestamp);
+      const diffDays = (now - logDate) / (1000 * 60 * 60 * 24);
+      if (bpTimeframe === '7') return diffDays <= 7;
+      if (bpTimeframe === '30') return diffDays <= 30;
+      return true;
+    });
+
+    const total = filteredBpLogs.length;
+    if (total === 0) {
+      return {
+        total: 0,
+        hypertoniaPct: 0,
+        highNormalPct: 0,
+        normalPct: 0,
+        avgSys: 0,
+        avgDia: 0,
+        avgPulse: 0,
+      };
+    }
+
+    const hyperCount = filteredBpLogs.filter((b) => b.status === 'HYPERTONIE').length;
+    const highNormalCount = filteredBpLogs.filter((b) => b.status === 'HOCH-NORMAL').length;
+    const normalCount = filteredBpLogs.filter((b) => b.status === 'NORMAL').length;
+
+    const hypertoniaPct = Math.round((hyperCount / total) * 100);
+    const highNormalPct = Math.round((highNormalCount / total) * 100);
+    const normalPct = Math.round((normalCount / total) * 100);
+
+    const sumSys = filteredBpLogs.reduce((acc, curr) => acc + curr.systolic, 0);
+    const sumDia = filteredBpLogs.reduce((acc, curr) => acc + curr.diastolic, 0);
+
+    const pulseLogs = filteredBpLogs.filter((b) => b.pulse && b.pulse > 0);
+    const sumPulse = pulseLogs.reduce((acc, curr) => acc + curr.pulse, 0);
+
+    return {
+      total,
+      hypertoniaPct,
+      highNormalPct,
+      normalPct,
+      avgSys: Math.round(sumSys / total),
+      avgDia: Math.round(sumDia / total),
+      avgPulse: pulseLogs.length > 0 ? Math.round(sumPulse / pulseLogs.length) : 0,
+    };
+  };
+
   const stats = calculateStatistics();
+  const bpStats = calculateBpStatistics();
   const theme = isDarkMode ? darkColors : lightColors;
 
   return (
@@ -714,97 +839,111 @@ export default function App() {
         <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
       </View>
 
-      {/* TAB-NAVIGATIONSLEISTE */}
+      {/* KORRIGIERTE DREI-TAB NAVIGATIONSLEISTE */}
       <View style={styles.mainTabRow}>
         <TouchableOpacity
           style={[
             styles.mainTabBtn,
-            { borderColor: theme.cardBorder, backgroundColor: activeTab === 'MEDS' ? theme.accent : theme.tabInactiveBg }
+            {
+              borderColor: theme.cardBorder,
+              backgroundColor: activeTab === 'MEDS' ? theme.accent : theme.tabInactiveBg,
+            },
           ]}
           onPress={() => setActiveTab('MEDS')}
+          activeOpacity={0.7}
         >
-          <Text
-            style={[
-              styles.mainTabText,
-              { color: activeTab === 'MEDS' ? theme.btnTextColor : theme.textMain }
-            ]}
-          >
-            💊 MEDIKAMENTE
-          </Text>
+          <View style={styles.tabContentRow}>
+            <Text style={styles.tabEmoji}>💊</Text>
+            <Text
+              style={[
+                styles.mainTabText,
+                { color: activeTab === 'MEDS' ? '#FFFFFF' : theme.textMain },
+              ]}
+            >
+              MEDS
+            </Text>
+          </View>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[
             styles.mainTabBtn,
-            { borderColor: theme.cardBorder, backgroundColor: activeTab === 'STATS' ? theme.accent : theme.tabInactiveBg }
+            {
+              borderColor: theme.cardBorder,
+              backgroundColor: activeTab === 'STATS' ? theme.accent : theme.tabInactiveBg,
+            },
           ]}
           onPress={() => setActiveTab('STATS')}
+          activeOpacity={0.7}
         >
-          <Text
-            style={[
-              styles.mainTabText,
-              { color: activeTab === 'STATS' ? theme.btnTextColor : theme.textMain }
-            ]}
-          >
-            📊 STATISTIK
-          </Text>
+          <View style={styles.tabContentRow}>
+            <Text style={styles.tabEmoji}>📊</Text>
+            <Text
+              style={[
+                styles.mainTabText,
+                { color: activeTab === 'STATS' ? '#FFFFFF' : theme.textMain },
+              ]}
+            >
+              STATISTIK
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.mainTabBtn,
+            {
+              borderColor: theme.cardBorder,
+              backgroundColor: activeTab === 'BP' ? theme.accent : theme.tabInactiveBg,
+            },
+          ]}
+          onPress={() => setActiveTab('BP')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.tabContentRow}>
+            <Text style={styles.tabEmoji}>🫀</Text>
+            <Text
+              style={[
+                styles.mainTabText,
+                { color: activeTab === 'BP' ? '#FFFFFF' : theme.textMain },
+              ]}
+            >
+              BLUTDRUCK
+            </Text>
+          </View>
         </TouchableOpacity>
       </View>
 
       {/* TAB 1: MEDIKAMENTE */}
-      {activeTab === 'MEDS' ? (
-        <>
-          {/* AKTIONSBUTTONS */}
+      {activeTab === 'MEDS' && (
+        <View style={{ flex: 1 }}>
           <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-              onPress={openNewModal}
-            >
+            <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={openNewModal}>
               <Text style={[styles.btnText, { color: theme.btnTextColor }]}>➕ NEU</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-              onPress={exportBackup}
-            >
+            <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={exportBackup}>
               <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>💾 SICHERN</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-              onPress={importBackupFile}
-            >
+            <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={importBackupFile}>
               <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📂 LADEN</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-              onPress={() => setGuideModalVisible(true)}
-            >
+            <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setGuideModalVisible(true)}>
               <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📖 HILFE</Text>
             </TouchableOpacity>
           </View>
 
-          {/* MEDIKAMENTENLISTE */}
           <FlatList
             data={meds}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContainer}
             ListEmptyComponent={
               <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
-                <Text style={[styles.emptyText, { color: theme.textSub }]}>
-                  [ 📭 KEINE MEDIKAMENTE ERFASST ]
-                </Text>
-                <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
-                  Tippe oben auf "➕ NEU", um einen Eintrag zu erstellen.
-                </Text>
+                <Text style={[styles.emptyText, { color: theme.textSub }]}>[ 📭 KEINE MEDIKAMENTE ERFASST ]</Text>
+                <Text style={[styles.emptySubText, { color: theme.textMuted }]}>Tippe oben auf "➕ NEU", um einen Eintrag zu erstellen.</Text>
               </View>
             }
             renderItem={({ item }) => (
-              <View
-                style={[
-                  styles.card,
-                  { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
-                  !item.active && styles.cardInactive
-                ]}
-              >
+              <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }, !item.active && styles.cardInactive]}>
                 <View style={styles.cardHeader}>
                   <View style={{ flex: 1 }}>
                     <View style={styles.timeBadge}>
@@ -824,53 +963,26 @@ export default function App() {
                   <Text style={[styles.cardSub, { color: theme.textSub }]}>
                     🧪 DOSIERUNG: <Text style={{ color: theme.textMain, fontWeight: '800' }}>{item.dosage}</Text>
                   </Text>
-                  {item.notes ? (
-                    <Text style={[styles.cardNotes, { color: theme.textMuted }]}>
-                      📝 HINWEIS: {item.notes}
-                    </Text>
-                  ) : null}
+                  {item.notes ? <Text style={[styles.cardNotes, { color: theme.textMuted }]}>📝 HINWEIS: {item.notes}</Text> : null}
                 </View>
 
-                {/* ZWEI-ZEILIGES BUTTON-GRID */}
                 <View style={styles.cardFooterContainer}>
                   <View style={styles.cardFooterRow}>
-                    <TouchableOpacity
-                      style={[styles.smallBtn, styles.greenBtn]}
-                      onPress={() => markAsTaken(item)}
-                    >
+                    <TouchableOpacity style={[styles.smallBtn, styles.greenBtn]} onPress={() => markAsTaken(item)}>
                       <Text style={styles.smallBtnTextGreen}>✅ NEHMEN</Text>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.smallBtn, styles.amberBtn]}
-                      onPress={() => {
-                        setSelectedMedForSnooze(item);
-                        setSnoozeModalVisible(true);
-                      }}
-                    >
+                    <TouchableOpacity style={[styles.smallBtn, styles.amberBtn]} onPress={() => { setSelectedMedForSnooze(item); setSnoozeModalVisible(true); }}>
                       <Text style={styles.smallBtnTextAmber}>⏱️ SPÄTER</Text>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.smallBtn, styles.purpleBtn]}
-                      onPress={() => skipMedication(item)}
-                    >
+                    <TouchableOpacity style={[styles.smallBtn, styles.purpleBtn]} onPress={() => skipMedication(item)}>
                       <Text style={styles.smallBtnTextPurple}>⏭️ ÜBERSPRINGEN</Text>
                     </TouchableOpacity>
                   </View>
-
                   <View style={styles.cardFooterRow}>
-                    <TouchableOpacity
-                      style={[styles.smallBtn, styles.blueBtn]}
-                      onPress={() => openEditModal(item)}
-                    >
+                    <TouchableOpacity style={[styles.smallBtn, styles.blueBtn]} onPress={() => openEditModal(item)}>
                       <Text style={styles.smallBtnTextBlue}>✏️ BEARBEITEN</Text>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.smallBtn, styles.redBtn]}
-                      onPress={() => deleteMedication(item.id)}
-                    >
+                    <TouchableOpacity style={[styles.smallBtn, styles.redBtn]} onPress={() => deleteMedication(item.id)}>
                       <Text style={styles.smallBtnTextRed}>🗑️ LÖSCHEN</Text>
                     </TouchableOpacity>
                   </View>
@@ -878,20 +990,20 @@ export default function App() {
               </View>
             )}
           />
-        </>
-      ) : (
-        /* TAB 2: STATISTIK & BEARBEITBARE HISTORIE */
+        </View>
+      )}
+
+      {/* TAB 2: STATISTIK MEDIKAMENTE */}
+      {activeTab === 'STATS' && (
         <ScrollView contentContainerStyle={styles.statsContainer}>
-          <Text style={[styles.statsSectionTitle, { color: theme.accent }]}>
+          <Text style={[styles.sectionHeaderTitle, { color: theme.accent }]}>
             📊 AUSWERTUNG & ANALYSE
           </Text>
 
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
               <Text style={styles.statIcon}>📈</Text>
-              <Text style={[styles.statValue, { color: '#10B981' }]}>
-                {stats.adherenceRate}%
-              </Text>
+              <Text style={[styles.statValue, { color: '#10B981' }]}>{stats.adherenceRate}%</Text>
               <Text style={[styles.statTitle, { color: theme.textMain }]}>EINNAHMEQUOTE</Text>
               <Text style={[styles.statSubText, { color: theme.textMuted }]}>
                 {stats.takenCount} von {stats.totalLogs} Dosen eingenommen ({stats.skippedCount} übersprungen).
@@ -904,34 +1016,21 @@ export default function App() {
                 {stats.averageDelay} <Text style={{ fontSize: 16 }}>Min.</Text>
               </Text>
               <Text style={[styles.statTitle, { color: theme.textMain }]}>DURCHSCHN. VERSPÄTUNG</Text>
-              <Text style={[styles.statSubText, { color: theme.textMuted }]}>
-                Durchschnittliche Abweichung zur eingestellten Uhrzeit.
-              </Text>
+              <Text style={[styles.statSubText, { color: theme.textMuted }]}>Abweichung zur eingestellten Uhrzeit.</Text>
             </View>
           </View>
 
-          <Text style={[styles.statsSectionTitle, { color: theme.textMain, marginTop: 24 }]}>
-            📋 HISTORIE ({logs.length} EINTRÄGE) - BEARBEITBAR & LÖSCHBAR
+          <Text style={[styles.sectionHeaderTitle, { color: theme.textMain, marginTop: 24 }]}>
+            📋 HISTORIE ({logs.length} EINTRÄGE)
           </Text>
 
           {logs.length === 0 ? (
             <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
-              <Text style={[styles.emptyText, { color: theme.textSub }]}>
-                [ 📭 NOCH KEINE STATISTIK-DATEN ]
-              </Text>
-              <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
-                Sobald du Medikamente einnimmst oder überspringst, erscheinen hier Berichte.
-              </Text>
+              <Text style={[styles.emptyText, { color: theme.textSub }]}>[ 📭 NOCH KEINE STATISTIK-DATEN ]</Text>
             </View>
           ) : (
             logs.map((log) => (
-              <View
-                key={log.id}
-                style={[
-                  styles.logItem,
-                  { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }
-                ]}
-              >
+              <View key={log.id} style={[styles.logItem, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
                 <View style={{ flex: 1, marginRight: 8 }}>
                   <Text style={[styles.logTitle, { color: theme.textMain }]}>💊 {log.title}</Text>
                   <Text style={[styles.logDate, { color: theme.textMuted }]}>
@@ -939,34 +1038,15 @@ export default function App() {
                   </Text>
                 </View>
 
-                {/* STATUS & BEARBEITUNGS-BUTTONS FÜR HISTORIE */}
                 <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      log.status === 'EINGENOMMEN' ? styles.badgeTaken : styles.badgeSkipped
-                    ]}
-                  >
-                    <Text
-                      style={
-                        log.status === 'EINGENOMMEN' ? styles.badgeTextTaken : styles.badgeTextSkipped
-                      }
-                    >
-                      {log.status}
-                    </Text>
+                  <View style={[styles.statusBadge, log.status === 'EINGENOMMEN' ? styles.badgeTaken : styles.badgeSkipped]}>
+                    <Text style={log.status === 'EINGENOMMEN' ? styles.badgeTextTaken : styles.badgeTextSkipped}>{log.status}</Text>
                   </View>
-
                   <View style={{ flexDirection: 'row', gap: 6 }}>
-                    <TouchableOpacity
-                      style={styles.logActionBtn}
-                      onPress={() => openEditLogModal(log)}
-                    >
+                    <TouchableOpacity style={styles.logActionBtn} onPress={() => openEditLogModal(log)}>
                       <Text style={{ fontSize: 12 }}>✏️</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.logActionBtn}
-                      onPress={() => deleteLogItem(log.id)}
-                    >
+                    <TouchableOpacity style={styles.logActionBtn} onPress={() => deleteLogItem(log.id)}>
                       <Text style={{ fontSize: 12 }}>🗑️</Text>
                     </TouchableOpacity>
                   </View>
@@ -977,72 +1057,220 @@ export default function App() {
         </ScrollView>
       )}
 
-      {/* ENTWICKLER-INFO FOOTER */}
+      {/* TAB 3: BLUTDRUCK-TAGEBUCH + STATISTIK */}
+      {activeTab === 'BP' && (
+        <ScrollView contentContainerStyle={styles.statsContainer}>
+          <Text style={[styles.sectionHeaderTitle, { color: theme.accent }]}>
+            🫀 BLUTDRUCK-STATISTIK & TAGEBUCH
+          </Text>
+
+          {/* ZEITRAUM-FILTER BUTTONS */}
+          <View style={styles.timeframeRow}>
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: bpTimeframe === 'ALL' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setBpTimeframe('ALL')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: bpTimeframe === 'ALL' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                GESAMT
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: bpTimeframe === '30' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setBpTimeframe('30')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: bpTimeframe === '30' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                30 TAGE
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: bpTimeframe === '7' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setBpTimeframe('7')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: bpTimeframe === '7' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                7 TAGE
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* PROZENTUALE PROFIL-AUSWERTUNG */}
+          <View style={[styles.bpStatsCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+            <Text style={[styles.bpStatsTitle, { color: theme.textMain }]}>
+              📊 ANALYSE ({bpStats.total} MESSUNGEN)
+            </Text>
+
+            <View style={styles.bpBarContainer}>
+              <View style={[styles.bpBarSegment, { backgroundColor: '#EF4444', flex: bpStats.hypertoniaPct || 1 }]} />
+              <View style={[styles.bpBarSegment, { backgroundColor: '#F59E0B', flex: bpStats.highNormalPct || 1 }]} />
+              <View style={[styles.bpBarSegment, { backgroundColor: '#10B981', flex: bpStats.normalPct || 1 }]} />
+            </View>
+
+            <View style={styles.bpPctGrid}>
+              <View style={styles.bpPctItem}>
+                <Text style={{ fontSize: 18, fontWeight: '900', color: '#EF4444' }}>{bpStats.hypertoniaPct}%</Text>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: theme.textSub }}>🔴 HYPERTONIE</Text>
+              </View>
+
+              <View style={styles.bpPctItem}>
+                <Text style={{ fontSize: 18, fontWeight: '900', color: '#F59E0B' }}>{bpStats.highNormalPct}%</Text>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: theme.textSub }}>🟡 HOCH-NORMAL</Text>
+              </View>
+
+              <View style={styles.bpPctItem}>
+                <Text style={{ fontSize: 18, fontWeight: '900', color: '#10B981' }}>{bpStats.normalPct}%</Text>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: theme.textSub }}>🟢 OPTIMAL</Text>
+              </View>
+            </View>
+
+            {bpStats.total > 0 && (
+              <View style={[styles.bpAvgRow, { borderColor: theme.cardBorder }]}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSub }}>
+                  Ø Wert: <Text style={{ color: theme.textMain, fontWeight: '900' }}>{bpStats.avgSys}/{bpStats.avgDia} mmHg</Text>
+                </Text>
+                {bpStats.avgPulse > 0 && (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSub }}>
+                    ❤️ Ø Puls: <Text style={{ color: theme.textMain, fontWeight: '900' }}>{bpStats.avgPulse} BPM</Text>
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.cyanBtn, { backgroundColor: theme.accent, marginBottom: 16 }]}
+            onPress={() => setBpModalVisible(true)}
+          >
+            <Text style={[styles.btnText, { color: theme.btnTextColor, fontSize: 12 }]}>➕ MESSUNG EINTRAGEN</Text>
+          </TouchableOpacity>
+
+          <Text style={[styles.sectionHeaderTitle, { color: theme.textMain }]}>
+            📋 HISTORIE DER MESSUNGEN
+          </Text>
+
+          {bpLogs.length === 0 ? (
+            <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+              <Text style={[styles.emptyText, { color: theme.textSub }]}>[ 📭 KEINE BLUTDRUCKMESSUNGEN ]</Text>
+              <Text style={[styles.emptySubText, { color: theme.textMuted }]}>Tippe oben auf "➕ MESSUNG EINTRAGEN".</Text>
+            </View>
+          ) : (
+            bpLogs.map((item) => {
+              let badgeStyle = styles.badgeGreen;
+              let badgeText = styles.badgeTextGreen;
+              if (item.status === 'HYPERTONIE') {
+                badgeStyle = styles.badgeRed;
+                badgeText = styles.badgeTextRed;
+              } else if (item.status === 'HOCH-NORMAL') {
+                badgeStyle = styles.badgeAmber;
+                badgeText = styles.badgeTextAmber;
+              }
+
+              return (
+                <View key={item.id} style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                      <Text style={{ fontSize: 20, fontWeight: '900', color: theme.textMain }}>
+                        {item.systolic} / {item.diastolic} <Text style={{ fontSize: 12, color: theme.textMuted }}>mmHg</Text>
+                      </Text>
+                      {item.pulse ? (
+                        <Text style={{ fontSize: 12, color: theme.textSub, marginTop: 2 }}>
+                          ❤️ Puls: <Text style={{ fontWeight: '800' }}>{item.pulse} BPM</Text>
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                      <View style={[styles.statusBadge, badgeStyle]}>
+                        <Text style={badgeText}>{item.status}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => deleteBpLog(item.id)}>
+                        <Text style={{ fontSize: 12, color: '#EF4444', fontWeight: '800' }}>🗑️ Löschen</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <Text style={{ fontSize: 10, color: theme.textMuted, marginTop: 8 }}>
+                    📅 {new Date(item.timestamp).toLocaleString('de-DE')}
+                  </Text>
+                  {item.notes ? (
+                    <Text style={{ fontSize: 11, fontStyle: 'italic', color: theme.textSub, marginTop: 4 }}>
+                      📝 {item.notes}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
+
+      {/* FOOTER */}
       <View style={[styles.developerFooter, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
         <Text style={[styles.developerText, { color: theme.textMuted }]}>
-          👨‍💻 Entwickler: Özgür Cetin  |  ✉️ ozgur.cetin@web.de
+          👨‍💻 Entwickler: Özgür Cetin | ✉️ ozgur.cetin@web.de
         </Text>
       </View>
 
-      {/* MODAL: HISTORIE EINTRAG BEARBEITEN */}
-      <Modal visible={logModalVisible} animationType="fade" transparent={true}>
+      {/* MODAL: BLUTDRUCK MESSUNG ANLEGEN */}
+      <Modal visible={bpModalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
-            <Text style={[styles.modalTitle, { color: theme.accent }]}>✏️ HISTORIE BEARBEITEN</Text>
+            <Text style={[styles.modalTitle, { color: theme.accent }]}>🫀 BLUTDRUCK MESSUNG</Text>
             <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
 
-            <Text style={[styles.inputLabel, { color: theme.textSub }]}>💊 MEDIKAMENTEN-NAME</Text>
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>SYSTOLISCH (mmHg)</Text>
             <TextInput
               style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              value={logTitle}
-              onChangeText={setLogTitle}
-            />
-
-            <Text style={[styles.inputLabel, { color: theme.textSub }]}>⏰ SOLL-UHRZEIT (HH:MM)</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              value={logTime}
-              onChangeText={setLogTime}
+              placeholder="z.B. 120"
+              placeholderTextColor={theme.placeholder}
               keyboardType="numeric"
-              maxLength={5}
+              value={systolic}
+              onChangeText={setSystolic}
             />
 
-            <Text style={[styles.inputLabel, { color: theme.textSub }]}>📌 STATUS</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-              <TouchableOpacity
-                style={[
-                  styles.statusSelectBtn,
-                  logStatus === 'EINGENOMMEN' && { backgroundColor: 'rgba(16, 185, 129, 0.3)', borderColor: '#10B981' },
-                  { borderColor: theme.cardBorder }
-                ]}
-                onPress={() => setLogStatus('EINGENOMMEN')}
-              >
-                <Text style={{ color: logStatus === 'EINGENOMMEN' ? '#10B981' : theme.textMuted, fontWeight: '800' }}>✅ EINGENOMMEN</Text>
-              </TouchableOpacity>
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>DIASTOLISCH (mmHg)</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
+              placeholder="z.B. 80"
+              placeholderTextColor={theme.placeholder}
+              keyboardType="numeric"
+              value={diastolic}
+              onChangeText={setDiastolic}
+            />
 
-              <TouchableOpacity
-                style={[
-                  styles.statusSelectBtn,
-                  logStatus === 'ÜBERSPRUNGEN' && { backgroundColor: 'rgba(168, 85, 247, 0.3)', borderColor: '#A855F7' },
-                  { borderColor: theme.cardBorder }
-                ]}
-                onPress={() => setLogStatus('ÜBERSPRUNGEN')}
-              >
-                <Text style={{ color: logStatus === 'ÜBERSPRUNGEN' ? '#A855F7' : theme.textMuted, fontWeight: '800' }}>⏭️ ÜBERSPRUNGEN</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>PULS (BPM - Optional)</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
+              placeholder="z.B. 72"
+              placeholderTextColor={theme.placeholder}
+              keyboardType="numeric"
+              value={pulse}
+              onChangeText={setPulse}
+            />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>HINWEIS / NOTIZ (Optional)</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
+              placeholder="z.B. Ruhig im Sitzen gemessen"
+              placeholderTextColor={theme.placeholder}
+              value={bpNotes}
+              onChangeText={setBpNotes}
+            />
 
             <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-                onPress={saveLogForm}
-              >
+              <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={saveBpEntry}>
                 <Text style={[styles.btnText, { color: theme.btnTextColor }]}>💾 SPEICHERN</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-                onPress={() => setLogModalVisible(false)}
-              >
+              <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setBpModalVisible(false)}>
                 <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
               </TouchableOpacity>
             </View>
@@ -1050,7 +1278,48 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: HILFE & BEDIENUNGSANLEITUNG */}
+      {/* MODAL: HISTORIE BEARBEITEN */}
+      <Modal visible={logModalVisible} animationType="fade" transparent={true}>
+        <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
+            <Text style={[styles.modalTitle, { color: theme.accent }]}>✏️ HISTORIE BEARBEITEN</Text>
+            <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>💊 MEDIKAMENTEN-NAME</Text>
+            <TextInput style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} value={logTitle} onChangeText={setLogTitle} />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>⏰ SOLL-UHRZEIT (HH:MM)</Text>
+            <TextInput style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} value={logTime} onChangeText={setLogTime} keyboardType="numeric" maxLength={5} />
+
+            <Text style={[styles.inputLabel, { color: theme.textSub }]}>📌 STATUS</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+              <TouchableOpacity
+                style={[styles.statusSelectBtn, logStatus === 'EINGENOMMEN' && { backgroundColor: 'rgba(16, 185, 129, 0.3)', borderColor: '#10B981' }, { borderColor: theme.cardBorder }]}
+                onPress={() => setLogStatus('EINGENOMMEN')}
+              >
+                <Text style={{ color: logStatus === 'EINGENOMMEN' ? '#10B981' : theme.textMuted, fontWeight: '800' }}>✅ EINGENOMMEN</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.statusSelectBtn, logStatus === 'ÜBERSPRUNGEN' && { backgroundColor: 'rgba(168, 85, 247, 0.3)', borderColor: '#A855F7' }, { borderColor: theme.cardBorder }]}
+                onPress={() => setLogStatus('ÜBERSPRUNGEN')}
+              >
+                <Text style={{ color: logStatus === 'ÜBERSPRUNGEN' ? '#A855F7' : theme.textMuted, fontWeight: '800' }}>⏭️ ÜBERSPRUNGEN</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={saveLogForm}>
+                <Text style={[styles.btnText, { color: theme.btnTextColor }]}>💾 SPEICHERN</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setLogModalVisible(false)}>
+                <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: HILFE (AKTUALISIERT) */}
       <Modal visible={guideModalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent, maxHeight: '85%' }]}>
@@ -1059,61 +1328,54 @@ export default function App() {
 
             <ScrollView contentContainerStyle={styles.guideContainer}>
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. PUSH-BENACHRICHTIGUNGEN & HINTERGRUND</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. NAVIGATION & TABS</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Alarme funktionieren zuverlässig. Wenn eine Benachrichtigung eingeht, kannst du direkt auf "Nehmen", "Später (+30 Min)" oder "Überspringen" tippen. Das Pop-up in der Statusleiste schließt sich dadurch sofort automatisch – selbst wenn die App im Hintergrund oder Task-Manager geschlossen war.
+                  Wechsle über die Kopfleiste flexibel zwischen den Bereichen **💊 MEDS** (Verwaltung & Alarme), **📊 STATISTIK** (Einnahmequote & Verlauf) und **🫀 BLUTDRUCK** (Messungen & Auswertung).
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>2. DESIGN & DUNKELMODUS</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>2. PUSH-BENACHRICHTIGUNGEN</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Über den Schalter oben rechts (☀️ HELL / 🌙 DUNKEL) lässt sich das Erscheinungsbild der App nahtlos anpassen.
+                  Erhalte pünktliche Alarme. Direkt in der Benachrichtigung kannst du auf "Nehmen", "Später" oder "Überspringen" tippen, ohne die App öffnen zu müssen.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>3. MEDIKAMENTE ANLEGEN & BEARBEITEN</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>3. BLUTDRUCK-TAGEBUCH & ZEITRÄUME</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  • <Text style={{ fontWeight: '800' }}>Neu:</Text> Tippe auf "➕ NEU". Die Uhrzeit (HH:MM) formatiert sich automatisch beim Tippen.{'\n'}
-                  • <Text style={{ fontWeight: '800' }}>Bearbeiten/Löschen:</Text> Nutze die Buttons "✏️ BEARBEITEN" oder "🗑️ LÖSCHEN" direkt auf der Medikamentenkarte.
+                  Erfasse Systole, Diastole und Puls. Im Blutdruck-Tab kannst du deine Werte über die Filter-Buttons (**GESAMT**, **30 TAGE**, **7 TAGE**) prozentual nach Kategorien (Hypertonie, Hoch-Normal, Optimal) auswerten lassen.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>4. STATISTIK & HISTORIE BEARBEITEN</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>4. DESIGN & DUNKELMODUS</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Im Statistik-Tab findest du deine Einnahmequote und Verspätung. Du kannst jeden einzelnen Eintrag in der **Historie** über die Symbole `✏️` bearbeiten oder `🗑️` löschen.
+                  Mit dem Schalter oben rechts (☀️ HELL / 🌙 DUNKEL) lässt sich das Layout augenschonend anpassen. Die Einstellung wird automatisch gespeichert.
                 </Text>
               </View>
 
               <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. DATENSICHERUNG</Text>
+                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. DATENSICHERUNG & WIEDERHERSTELLUNG</Text>
                 <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  • <Text style={{ fontWeight: '800' }}>💾 SICHERN:</Text> Erstellt eine `.json`-Datei im Handyspeicher.{'\n'}
-                  • <Text style={{ fontWeight: '800' }}>📂 LADEN:</Text> Stellt deine Daten aus einer Sicherung wieder her.
+                  Sichere deine Medikamente, Einnahme-Historien und Blutdruckwerte als JSON-Datei über "💾 SICHERN" und spiele sie bei Bedarf über "📂 LADEN" wieder ein.
                 </Text>
               </View>
             </ScrollView>
 
-            <TouchableOpacity
-              style={[styles.closeModalBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-              onPress={() => setGuideModalVisible(false)}
-            >
+            <TouchableOpacity style={[styles.closeModalBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setGuideModalVisible(false)}>
               <Text style={[styles.closeModalBtnText, { color: theme.outlineText }]}>❌ SCHLIESSEN</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* MODAL: ERINNERUNG VERZÖGERN */}
+      {/* MODAL: SPÄTER / SNOOZE */}
       <Modal visible={snoozeModalVisible} animationType="fade" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
             <Text style={[styles.modalTitle, { color: theme.accent }]}>⏳ ERINNERUNG VERZÖGERN</Text>
-            <Text style={[styles.modalSub, { color: theme.textSub }]}>
-              Wähle eine Zeitspanne oder gib eine beliebige Minutenzahl ein:
-            </Text>
+            <Text style={[styles.modalSub, { color: theme.textSub }]}>Wähle eine Zeitspanne:</Text>
 
             <View style={styles.snoozeGrid}>
               <TouchableOpacity style={styles.snoozeOptionBtn} onPress={() => { executeSnooze(selectedMedForSnooze, 15); setSnoozeModalVisible(false); }}>
@@ -1132,33 +1394,20 @@ export default function App() {
 
             <Text style={[styles.inputLabel, { color: theme.textSub, marginTop: 16 }]}>⚙️ FREI WÄHLBAR (MINUTEN)</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput
-                style={[styles.input, { flex: 1, backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-                placeholder="z.B. 90"
-                placeholderTextColor={theme.placeholder}
-                keyboardType="numeric"
-                value={customSnoozeMinutes}
-                onChangeText={setCustomSnoozeMinutes}
-              />
-              <TouchableOpacity
-                style={[styles.cyanBtn, { flex: 0.8, backgroundColor: theme.accent }]}
-                onPress={handleCustomSnoozeSubmit}
-              >
+              <TextInput style={[styles.input, { flex: 1, backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} placeholder="z.B. 90" placeholderTextColor={theme.placeholder} keyboardType="numeric" value={customSnoozeMinutes} onChangeText={setCustomSnoozeMinutes} />
+              <TouchableOpacity style={[styles.cyanBtn, { flex: 0.8, backgroundColor: theme.accent }]} onPress={handleCustomSnoozeSubmit}>
                 <Text style={[styles.btnText, { color: theme.btnTextColor }]}>OK</Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[styles.closeModalBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-              onPress={() => setSnoozeModalVisible(false)}
-            >
+            <TouchableOpacity style={[styles.closeModalBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setSnoozeModalVisible(false)}>
               <Text style={[styles.closeModalBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* MODAL: MEDIKAMENT ANLEGEN & BEARBEITEN */}
+      {/* MODAL: MEDIKAMENT ANLEGEN / BEARBEITEN */}
       <Modal visible={modalVisible} animationType="slide" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
@@ -1168,54 +1417,22 @@ export default function App() {
             <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
 
             <Text style={[styles.inputLabel, { color: theme.textSub }]}>💊 NAME DES MEDIKAMENTS</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              placeholder="z.B. Ibuprofen"
-              placeholderTextColor={theme.placeholder}
-              value={title}
-              onChangeText={setTitle}
-            />
+            <TextInput style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} placeholder="z.B. Ibuprofen" placeholderTextColor={theme.placeholder} value={title} onChangeText={setTitle} />
 
             <Text style={[styles.inputLabel, { color: theme.textSub }]}>🧪 DOSIERUNG</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              placeholder="z.B. 400mg / 1 Tablette"
-              placeholderTextColor={theme.placeholder}
-              value={dosage}
-              onChangeText={setDosage}
-            />
+            <TextInput style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} placeholder="z.B. 400mg / 1 Tablette" placeholderTextColor={theme.placeholder} value={dosage} onChangeText={setDosage} />
 
             <Text style={[styles.inputLabel, { color: theme.textSub }]}>⏰ UHRZEIT (HH:MM)</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              placeholder="08:00"
-              placeholderTextColor={theme.placeholder}
-              value={time}
-              onChangeText={handleTimeChange}
-              keyboardType="numeric"
-              maxLength={5}
-            />
+            <TextInput style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} placeholder="08:00" placeholderTextColor={theme.placeholder} value={time} onChangeText={handleTimeChange} keyboardType="numeric" maxLength={5} />
 
             <Text style={[styles.inputLabel, { color: theme.textSub }]}>📝 HINWEIS / NOTIZ</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              placeholder="z.B. Nach dem Essen einnehmen"
-              placeholderTextColor={theme.placeholder}
-              value={notes}
-              onChangeText={setNotes}
-            />
+            <TextInput style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} placeholder="z.B. Nach dem Essen einnehmen" placeholderTextColor={theme.placeholder} value={notes} onChangeText={setNotes} />
 
             <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-                onPress={saveMedicationForm}
-              >
+              <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={saveMedicationForm}>
                 <Text style={[styles.btnText, { color: theme.btnTextColor }]}>💾 SPEICHERN</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-                onPress={() => setModalVisible(false)}
-              >
+              <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setModalVisible(false)}>
                 <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
               </TouchableOpacity>
             </View>
@@ -1223,36 +1440,17 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* MODAL: MANUELLE SICHERUNG / TEXT-EINGABE */}
+      {/* MODAL: MANUELLE SICHERUNG */}
       <Modal visible={backupModalVisible} animationType="fade" transparent={true}>
         <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
             <Text style={[styles.modalTitle, { color: theme.accent }]}>💾 DATENSICHERUNG</Text>
-            <Text style={[styles.modalSub, { color: theme.textSub }]}>
-              Kopiere den Sicherungscode oder füge den Inhalt hier ein:
-            </Text>
-
-            <TextInput
-              style={[styles.input, styles.textArea, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]}
-              multiline
-              numberOfLines={8}
-              value={rawJsonText}
-              onChangeText={setRawJsonText}
-              placeholder="Sicherungscode hier einfügen..."
-              placeholderTextColor={theme.placeholder}
-            />
-
+            <TextInput style={[styles.input, styles.textArea, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder, color: theme.textMain }]} multiline numberOfLines={8} value={rawJsonText} onChangeText={setRawJsonText} placeholder="Sicherungscode..." placeholderTextColor={theme.placeholder} />
             <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={[styles.cyanBtn, { backgroundColor: theme.accent }]}
-                onPress={() => processImportData(rawJsonText)}
-              >
+              <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={() => processImportData(rawJsonText)}>
                 <Text style={[styles.btnText, { color: theme.btnTextColor }]}>📂 LADEN</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]}
-                onPress={() => setBackupModalVisible(false)}
-              >
+              <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setBackupModalVisible(false)}>
                 <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>❌ SCHLIESSEN</Text>
               </TouchableOpacity>
             </View>
@@ -1340,24 +1538,36 @@ const styles = StyleSheet.create({
   },
   mainTabRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     marginTop: 10,
-    marginBottom: 6,
-    gap: 8,
+    marginBottom: 8,
+    gap: 6,
   },
   mainTabBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 1,
+    minHeight: 44,
+  },
+  tabContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  tabEmoji: {
+    fontSize: 14,
   },
   mainTabText: {
     fontWeight: '900',
-    fontSize: 12,
-    letterSpacing: 0.8,
+    fontSize: 10,
+    letterSpacing: 0.3,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   actionRow: {
     flexDirection: 'row',
@@ -1371,7 +1581,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 2,
   },
   btnText: {
     fontWeight: '900',
@@ -1506,16 +1715,16 @@ const styles = StyleSheet.create({
   smallBtnTextBlue: { color: '#0284C7', fontSize: 9, fontWeight: '800', textAlign: 'center' },
   smallBtnTextRed: { color: '#EF4444', fontSize: 9, fontWeight: '800', textAlign: 'center' },
 
-  // STATS STYLES
   statsContainer: {
     paddingHorizontal: 20,
     paddingBottom: 20,
+    paddingTop: 4,
   },
-  statsSectionTitle: {
-    fontSize: 12,
+  sectionHeaderTitle: {
+    fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 1,
-    marginVertical: 10,
+    letterSpacing: 0.8,
+    marginVertical: 12,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -1535,7 +1744,6 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 26,
     fontWeight: '900',
-    letterSpacing: 0.5,
   },
   statTitle: {
     fontSize: 9,
@@ -1550,6 +1758,62 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 12,
   },
+
+  // STYLES BLUTDRUCK STATISTIK
+  timeframeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  timeframeBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  timeframeBtnText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  bpStatsCard: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  bpStatsTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  bpBarContainer: {
+    height: 12,
+    borderRadius: 6,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  bpBarSegment: {
+    height: '100%',
+  },
+  bpPctGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  bpPctItem: {
+    alignItems: 'center',
+  },
+  bpAvgRow: {
+    borderTopWidth: 1,
+    marginTop: 12,
+    paddingTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+
   logItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1572,25 +1836,19 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 4,
   },
-  badgeTaken: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-  },
-  badgeSkipped: {
-    backgroundColor: 'rgba(168, 85, 247, 0.15)',
-  },
-  badgeTextTaken: {
-    color: '#10B981',
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  badgeTextSkipped: {
-    color: '#A855F7',
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  logActionBtn: {
-    padding: 4,
-  },
+  badgeTaken: { backgroundColor: 'rgba(16, 185, 129, 0.15)' },
+  badgeSkipped: { backgroundColor: 'rgba(168, 85, 247, 0.15)' },
+  badgeTextTaken: { color: '#10B981', fontSize: 9, fontWeight: '900' },
+  badgeTextSkipped: { color: '#A855F7', fontSize: 9, fontWeight: '900' },
+
+  badgeGreen: { backgroundColor: 'rgba(16, 185, 129, 0.15)' },
+  badgeAmber: { backgroundColor: 'rgba(245, 158, 11, 0.15)' },
+  badgeRed: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+  badgeTextGreen: { color: '#10B981', fontSize: 9, fontWeight: '900' },
+  badgeTextAmber: { color: '#F59E0B', fontSize: 9, fontWeight: '900' },
+  badgeTextRed: { color: '#EF4444', fontSize: 9, fontWeight: '900' },
+
+  logActionBtn: { padding: 4 },
   statusSelectBtn: {
     flex: 1,
     borderWidth: 1,
@@ -1599,7 +1857,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   developerFooter: {
     borderTopWidth: 1,
     paddingVertical: 10,
@@ -1608,7 +1865,6 @@ const styles = StyleSheet.create({
   developerText: {
     fontSize: 10,
     fontWeight: '600',
-    letterSpacing: 0.5,
   },
   snoozeGrid: {
     flexDirection: 'row',
@@ -1629,7 +1885,6 @@ const styles = StyleSheet.create({
   snoozeOptionText: {
     color: '#F59E0B',
     fontWeight: '900',
-    letterSpacing: 1,
   },
   closeModalBtn: {
     borderWidth: 1,
@@ -1641,7 +1896,6 @@ const styles = StyleSheet.create({
   },
   closeModalBtnText: {
     fontWeight: '800',
-    letterSpacing: 1,
     fontSize: 11,
   },
   modalOverlay: {
@@ -1656,7 +1910,6 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontWeight: '900',
-    letterSpacing: 1.5,
     fontSize: 15,
   },
   modalSub: {
@@ -1667,7 +1920,6 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 1,
     marginTop: 12,
     marginBottom: 4,
   },
@@ -1699,7 +1951,6 @@ const styles = StyleSheet.create({
   guideHeader: {
     fontSize: 11,
     fontWeight: '900',
-    letterSpacing: 1,
     marginBottom: 4,
   },
   guideText: {
