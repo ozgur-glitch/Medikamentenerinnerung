@@ -63,7 +63,10 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [bpLogs, setBpLogs] = useState([]);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [activeTab, setActiveTab] = useState('MEDS'); // 'MEDS', 'STATS', 'BP'
+  const [activeTab, setActiveTab] = useState('MEDS'); // 'MEDS', 'STATS', 'BP', 'INFO'
+
+  // Zeitraum-Filter für Medikamenten-Statistik ('ALL', '30', '15', '7')
+  const [medTimeframe, setMedTimeframe] = useState('ALL');
 
   // Zeitraum-Filter für Blutdruck-Statistik ('ALL', '30', '7')
   const [bpTimeframe, setBpTimeframe] = useState('ALL');
@@ -716,10 +719,22 @@ export default function App() {
     }
   };
 
+  // ERWEITERTE MEDIKAMENTEN-STATISTIK (INKL. 15 UND 30 TAGE)
   const calculateStatistics = () => {
-    const totalLogs = logs.length;
-    const takenLogs = logs.filter((l) => l.status === 'EINGENOMMEN');
-    const skippedLogs = logs.filter((l) => l.status === 'ÜBERSPRUNGEN');
+    const now = new Date();
+    const filteredLogs = logs.filter((item) => {
+      if (medTimeframe === 'ALL') return true;
+      const logDate = new Date(item.timestamp);
+      const diffDays = (now - logDate) / (1000 * 60 * 60 * 24);
+      if (medTimeframe === '7') return diffDays <= 7;
+      if (medTimeframe === '15') return diffDays <= 15;
+      if (medTimeframe === '30') return diffDays <= 30;
+      return true;
+    });
+
+    const totalLogs = filteredLogs.length;
+    const takenLogs = filteredLogs.filter((l) => l.status === 'EINGENOMMEN');
+    const skippedLogs = filteredLogs.filter((l) => l.status === 'ÜBERSPRUNGEN');
 
     const adherenceRate = totalLogs > 0 ? Math.round((takenLogs.length / totalLogs) * 100) : 0;
 
@@ -839,7 +854,7 @@ export default function App() {
         <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent }]} />
       </View>
 
-      {/* KORRIGIERTE DREI-TAB NAVIGATIONSLEISTE */}
+      {/* 4-TAB NAVIGATIONSLEISTE (UPGRADED) */}
       <View style={styles.mainTabRow}>
         <TouchableOpacity
           style={[
@@ -912,6 +927,30 @@ export default function App() {
             </Text>
           </View>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.mainTabBtn,
+            {
+              borderColor: theme.cardBorder,
+              backgroundColor: activeTab === 'INFO' ? theme.accent : theme.tabInactiveBg,
+            },
+          ]}
+          onPress={() => setActiveTab('INFO')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.tabContentRow}>
+            <Text style={styles.tabEmoji}>⚙️</Text>
+            <Text
+              style={[
+                styles.mainTabText,
+                { color: activeTab === 'INFO' ? '#FFFFFF' : theme.textMain },
+              ]}
+            >
+              INFO & DATEN
+            </Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* TAB 1: MEDIKAMENTE */}
@@ -919,16 +958,7 @@ export default function App() {
         <View style={{ flex: 1 }}>
           <View style={styles.actionRow}>
             <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={openNewModal}>
-              <Text style={[styles.btnText, { color: theme.btnTextColor }]}>➕ NEU</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={exportBackup}>
-              <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>💾 SICHERN</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={importBackupFile}>
-              <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📂 LADEN</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setGuideModalVisible(true)}>
-              <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📖 HILFE</Text>
+              <Text style={[styles.btnText, { color: theme.btnTextColor }]}>➕ NEUES MEDIKAMENT ERSTELLEN</Text>
             </TouchableOpacity>
           </View>
 
@@ -939,7 +969,7 @@ export default function App() {
             ListEmptyComponent={
               <View style={[styles.emptyCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
                 <Text style={[styles.emptyText, { color: theme.textSub }]}>[ 📭 KEINE MEDIKAMENTE ERFASST ]</Text>
-                <Text style={[styles.emptySubText, { color: theme.textMuted }]}>Tippe oben auf "➕ NEU", um einen Eintrag zu erstellen.</Text>
+                <Text style={[styles.emptySubText, { color: theme.textMuted }]}>Tippe oben auf den Button, um einen Eintrag zu erstellen.</Text>
               </View>
             }
             renderItem={({ item }) => (
@@ -999,6 +1029,57 @@ export default function App() {
           <Text style={[styles.sectionHeaderTitle, { color: theme.accent }]}>
             📊 AUSWERTUNG & ANALYSE
           </Text>
+
+          {/* NEUE ZEITRAUM-FILTER FÜR MEDIKAMENTE (GESAMT, 30, 15, 7 TAGE) */}
+          <View style={styles.timeframeRow}>
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: medTimeframe === 'ALL' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setMedTimeframe('ALL')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: medTimeframe === 'ALL' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                GESAMT
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: medTimeframe === '30' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setMedTimeframe('30')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: medTimeframe === '30' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                30 TAGE
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: medTimeframe === '15' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setMedTimeframe('15')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: medTimeframe === '15' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                15 TAGE
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.timeframeBtn,
+                { borderColor: theme.cardBorder, backgroundColor: medTimeframe === '7' ? theme.accent : theme.tabInactiveBg }
+              ]}
+              onPress={() => setMedTimeframe('7')}
+            >
+              <Text style={[styles.timeframeBtnText, { color: medTimeframe === '7' ? (isDarkMode ? '#030712' : '#FFFFFF') : theme.textMain }]}>
+                7 TAGE
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
@@ -1213,6 +1294,61 @@ export default function App() {
         </ScrollView>
       )}
 
+      {/* TAB 4: INFO & DATEN (NEU AUSGELAGERT) */}
+      {activeTab === 'INFO' && (
+        <ScrollView contentContainerStyle={styles.statsContainer}>
+          <Text style={[styles.sectionHeaderTitle, { color: theme.accent }]}>
+            ⚙️ DATENSICHERUNG & WIEDERHERSTELLUNG
+          </Text>
+
+          <View style={[styles.bpStatsCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+            <Text style={[styles.bpStatsTitle, { color: theme.textMain }]}>💾 DATENVERWALTUNG</Text>
+            <Text style={[styles.guideText, { color: theme.textSub, marginBottom: 16 }]}>
+              Sichere all deine Medikamente, Einnahme-Berichte und Blutdruckwerte als JSON-Datei oder spiele ein bestehendes Backup wieder ein.
+            </Text>
+
+            <View style={{ gap: 10 }}>
+              <TouchableOpacity style={[styles.cyanBtn, { backgroundColor: theme.accent }]} onPress={exportBackup}>
+                <Text style={[styles.btnText, { color: theme.btnTextColor }]}>💾 DATEN SICHERN (.JSON)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.outlineBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={importBackupFile}>
+                <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>📂 DATEN LADEN / WIEDERHERSTELLEN</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <Text style={[styles.sectionHeaderTitle, { color: theme.accent, marginTop: 10 }]}>
+            📖 BEDIENUNGSANLEITUNG & HILFE
+          </Text>
+
+          <View style={[styles.bpStatsCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+            <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
+              <Text style={[styles.guideHeader, { color: theme.accent }]}>1. DIE NEUE 4-TAB-STRUKTUR</Text>
+              <Text style={[styles.guideText, { color: theme.textMain }]}>
+                • **💊 MEDS:** Verwaltung und Erstellung deiner Medikamente.{'\n'}
+                • **📊 STATISTIK:** Einnahmequoten gefiltert nach Gesamt, 30, 15 oder 7 Tagen.{'\n'}
+                • **🫀 BLUTDRUCK:** Blutdruck-Tagebuch mit prozentualer Auswertung.{'\n'}
+                • **⚙️ INFO & DATEN:** Hier findest du die Datensicherung und diese Hilfe.
+              </Text>
+            </View>
+
+            <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
+              <Text style={[styles.guideHeader, { color: theme.accent }]}>2. PUSH-BENACHRICHTIGUNGEN</Text>
+              <Text style={[styles.guideText, { color: theme.textMain }]}>
+                Pünktliche Alarme erlauben das direkte Bestätigen ("Nehmen", "Später", "Überspringen") direkt aus der Statusleiste heraus.
+              </Text>
+            </View>
+
+            <View style={[styles.guideRow, { borderColor: theme.cardBorder, borderBottomWidth: 0 }]}>
+              <Text style={[styles.guideHeader, { color: theme.accent }]}>3. DUNKELMODUS</Text>
+              <Text style={[styles.guideText, { color: theme.textMain }]}>
+                Über den Schalter oben rechts lässt sich das Design jederzeit flexibel auf Hell oder Dunkel umschalten.
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
+      )}
+
       {/* FOOTER */}
       <View style={[styles.developerFooter, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
         <Text style={[styles.developerText, { color: theme.textMuted }]}>
@@ -1315,57 +1451,6 @@ export default function App() {
                 <Text style={[styles.outlineBtnText, { color: theme.outlineText }]}>❌ ABBRECHEN</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL: HILFE (AKTUALISIERT) */}
-      <Modal visible={guideModalVisible} animationType="slide" transparent={true}>
-        <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
-          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.accent, maxHeight: '85%' }]}>
-            <Text style={[styles.modalTitle, { color: theme.accent }]}>📖 BEDIENUNGSANLEITUNG & HILFE</Text>
-            <View style={[styles.neonBar, { backgroundColor: theme.accent, shadowColor: theme.accent, marginBottom: 10 }]} />
-
-            <ScrollView contentContainerStyle={styles.guideContainer}>
-              <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>1. NAVIGATION & TABS</Text>
-                <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Wechsle über die Kopfleiste flexibel zwischen den Bereichen **💊 MEDS** (Verwaltung & Alarme), **📊 STATISTIK** (Einnahmequote & Verlauf) und **🫀 BLUTDRUCK** (Messungen & Auswertung).
-                </Text>
-              </View>
-
-              <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>2. PUSH-BENACHRICHTIGUNGEN</Text>
-                <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Erhalte pünktliche Alarme. Direkt in der Benachrichtigung kannst du auf "Nehmen", "Später" oder "Überspringen" tippen, ohne die App öffnen zu müssen.
-                </Text>
-              </View>
-
-              <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>3. BLUTDRUCK-TAGEBUCH & ZEITRÄUME</Text>
-                <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Erfasse Systole, Diastole und Puls. Im Blutdruck-Tab kannst du deine Werte über die Filter-Buttons (**GESAMT**, **30 TAGE**, **7 TAGE**) prozentual nach Kategorien (Hypertonie, Hoch-Normal, Optimal) auswerten lassen.
-                </Text>
-              </View>
-
-              <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>4. DESIGN & DUNKELMODUS</Text>
-                <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Mit dem Schalter oben rechts (☀️ HELL / 🌙 DUNKEL) lässt sich das Layout augenschonend anpassen. Die Einstellung wird automatisch gespeichert.
-                </Text>
-              </View>
-
-              <View style={[styles.guideRow, { borderColor: theme.cardBorder }]}>
-                <Text style={[styles.guideHeader, { color: theme.accent }]}>5. DATENSICHERUNG & WIEDERHERSTELLUNG</Text>
-                <Text style={[styles.guideText, { color: theme.textMain }]}>
-                  Sichere deine Medikamente, Einnahme-Historien und Blutdruckwerte als JSON-Datei über "💾 SICHERN" und spiele sie bei Bedarf über "📂 LADEN" wieder ein.
-                </Text>
-              </View>
-            </ScrollView>
-
-            <TouchableOpacity style={[styles.closeModalBtn, { borderColor: theme.outlineBorder, backgroundColor: theme.outlineBg }]} onPress={() => setGuideModalVisible(false)}>
-              <Text style={[styles.closeModalBtnText, { color: theme.outlineText }]}>❌ SCHLIESSEN</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1538,10 +1623,10 @@ const styles = StyleSheet.create({
   },
   mainTabRow: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     marginTop: 10,
-    marginBottom: 8,
-    gap: 6,
+    marginBottom: 6,
+    gap: 4,
   },
   mainTabBtn: {
     flex: 1,
@@ -1557,27 +1642,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 3,
   },
   tabEmoji: {
-    fontSize: 14,
+    fontSize: 12,
   },
   mainTabText: {
     fontWeight: '900',
-    fontSize: 10,
-    letterSpacing: 0.3,
+    fontSize: 9,
+    letterSpacing: 0.2,
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
   actionRow: {
-    flexDirection: 'row',
     paddingHorizontal: 20,
     marginVertical: 10,
-    gap: 6,
   },
   cyanBtn: {
-    flex: 1.2,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1585,10 +1667,9 @@ const styles = StyleSheet.create({
   btnText: {
     fontWeight: '900',
     letterSpacing: 0.5,
-    fontSize: 10,
+    fontSize: 11,
   },
   outlineBtn: {
-    flex: 1,
     borderWidth: 1,
     paddingVertical: 12,
     borderRadius: 6,
@@ -1598,7 +1679,7 @@ const styles = StyleSheet.create({
   outlineBtnText: {
     fontWeight: '800',
     letterSpacing: 0.5,
-    fontSize: 9,
+    fontSize: 10,
   },
   listContainer: {
     paddingHorizontal: 20,
@@ -1759,10 +1840,9 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
 
-  // STYLES BLUTDRUCK STATISTIK
   timeframeRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     marginBottom: 12,
   },
   timeframeBtn: {
@@ -1773,9 +1853,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   timeframeBtnText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   bpStatsCard: {
     borderWidth: 1,
@@ -1940,9 +2020,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 20,
     gap: 10,
-  },
-  guideContainer: {
-    paddingVertical: 5,
   },
   guideRow: {
     borderBottomWidth: 1,
